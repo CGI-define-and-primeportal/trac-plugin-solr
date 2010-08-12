@@ -1,46 +1,76 @@
 from Queue import Queue
 import os
+from genshi.builder import tag
+
 from trac.core import Component, implements, TracError, Interface
 from trac.web.chrome import add_stylesheet
-from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener
+from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
 from trac.wiki.api import IWikiChangeListener
 from trac.attachment import IAttachmentChangeListener
 from trac.versioncontrol.api import IRepositoryChangeListener
 from trac.core import ExtensionPoint
-from trac.resource import get_resource_name
+from trac.resource import get_resource_name, get_resource_shortname
+from trac.search import ISearchSource, shorten_result
+from trac.util.translation import _, tag_
+
 from pkg_resources import resource_filename
 import re
+import sunburnt
 
-class FullTextSearchObject(dict):
-    possible_fields = ('id', 'author', 'changed', 'created', 'oneline', 'realm', 
-                       'tags', 'involved', 'body', 'popularity')
+class FullTextSearchObject(object):
+
+    title      = None
+    author     = None
+    changed    = None
+    created    = None
+    oneline    = None
+    realm      = None
+    tags       = None
+    involved   = None
+    popularity = None
+    body       = None
 
     def __init__(self, id, **kwargs):
         self.id = id
-        self.__dict__.update(kwargs)
+#        self.__dict__.update(kwargs)
+    
 
 class Backend(Queue):
     """
     """
-
+    
     def create(self, item):
         item.action = 'CREATE'
         self.put(item)
+        self.commit()
         
     def modify(self, id, item):
         item.action = 'MODIFY'
         self.put(item)
+        self.commit()
     
     def delete(self, id, item):
         item.action = 'DELETE'
         self.put(item)
+        self.commit()
+        
+    def commit(self):
+        s = sunburnt.SolrInterface("http://localhost:8080/solr","/etc/solr/conf/schema.xml")
+        try:
+            s.add(self.get()) #We can add multiple documents if we want
+            s.commit()
+        except Exception, e:
+#            import pdb;pdb.set_trace()
+            pass
+        
+
         
 class FullTextSearch(Component):
     """Search all ChangeListeners and prepare the output for a full text 
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener)
+               IRepositoryChangeListener, ISearchSource)
     
     def __init__(self):
         self.backend = Backend()
@@ -52,7 +82,11 @@ class FullTextSearch(Component):
     
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
+        ticketsystem = TicketSystem(self.env)
         so = FullTextSearchObject(self._unique_id(ticket.resource))
+        so.title = "%(title)s: %(message)s"%{
+                        'title':get_resource_shortname(self.env, ticket.resource),
+                        'message':ticketsystem.get_resource_description(ticket.resource, format='summary')}
         so.author = ticket.values.get('reporter',None)
         so.changed = ticket.values.get('changetime', None)
         so.created = ticket.values.get('changetime', None)
@@ -62,10 +96,11 @@ class FullTextSearch(Component):
         if not so.involved:
             so.involved = so.author
         so.popularity = 0 #FIXME
-        so.body = ticket.values
+        so.oneline = shorten_result(ticket.values.get('description', ''))
+        so.body = repr(ticket.values)
         self.backend.create(so)
         self.log.debug("Ticket added for indexing: %s %s"%(ticket,so))
-
+        
     def ticket_changed(self, ticket, comment, author, old_values):
         so = FullTextSearchObject(self._unique_id(ticket.resource))
         so.changed = ticket.values.get('changetime', None)
@@ -156,3 +191,42 @@ class FullTextSearch(Component):
         be retrieved.
         """
         pass
+
+    # ISearchSource methods.
+
+    def get_search_filters(self, req):
+        yield ('fulltext', 'Full text search', True)
+
+    def get_search_results(self, req, terms, filters):
+        self.log.debug("get_search_result called")
+        if not 'fulltext' in filters:
+            return
+        si = sunburnt.SolrInterface("http://localhost:8080/solr","/etc/solr/conf/schema.xml")
+#        import pdb;pdb.set_trace()
+        
+        if self._has_wildcard(terms):
+            self.log.debug("Found wildcard query, switching to standard parser")
+            result = si.query(terms[0]).execute().result
+        else:
+            result = si.search(q=terms,qt="dismax").result
+#        The events returned by this function must be tuples of the form
+#        `(href, title, date, author, excerpt).`
+        res = []
+
+        from datetime import datetime
+        from trac.util import datefmt
+        
+        if result.numFound:
+            for doc in result.docs:
+                date = doc.get('changed', None)
+                if date is not None:
+                    date = date._dt_obj.replace(tzinfo=datefmt.localtz)
+                (proj,realm,rid) = doc['id'].split('.')
+                href = req.href(realm, rid)
+                tmp = (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
+                yield tmp
+    def _has_wildcard(self, terms):
+        for term in terms:
+            if '*' in term:
+                return True
+        return False
