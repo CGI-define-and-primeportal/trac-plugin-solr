@@ -34,7 +34,7 @@ setup(
     version = '0.0',
     author = 'Mikael Frykholm',
     author_email = 'mikael.frykholm@logica.com',
-    description = "Provide full text indexing of all items.",
+    description = "Provide full text indexing of all core items like tickets, wiki, attachments, source code.",
     license = \
     """Copyright (c) 2010, Logica. All rights reserved. Released under the 3-clause BSD license. """,
     url = "http://define4.trac.uk.logica.com",
