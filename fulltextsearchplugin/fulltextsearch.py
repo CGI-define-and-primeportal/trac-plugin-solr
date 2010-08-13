@@ -12,6 +12,7 @@ from trac.core import ExtensionPoint
 from trac.resource import get_resource_name, get_resource_shortname
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _, tag_
+from trac.config import Option
 
 from pkg_resources import resource_filename
 import re
@@ -38,6 +39,11 @@ class FullTextSearchObject(object):
 class Backend(Queue):
     """
     """
+
+    def __init__(self, solr_endpoint, solr_schema):
+        Queue.__init__(self)
+        self.solr_endpoint = solr_endpoint
+        self.solr_schema   = solr_schema
     
     def create(self, item):
         item.action = 'CREATE'
@@ -55,7 +61,8 @@ class Backend(Queue):
         self.commit()
         
     def commit(self):
-        s = sunburnt.SolrInterface("http://localhost:8080/solr","/etc/solr/conf/schema.xml")
+        s = sunburnt.SolrInterface(self.solr_endpoint,
+                                   self.solr_schema)
         try:
             s.add(self.get()) #We can add multiple documents if we want
             s.commit()
@@ -71,9 +78,17 @@ class FullTextSearch(Component):
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
                IRepositoryChangeListener, ISearchSource)
+
+    solr_endpoint = Option("search", "solr_endpoint",
+                           default="http://localhost:8080/solr",
+                           doc="URL to use for HTTP REST calls to Solr")
+
+    solr_schema = Option("search", "solr_schema",
+                         default="/etc/solr/conf/schema.xml",
+                         doc="Path to Solr schema XML")
     
     def __init__(self):
-        self.backend = Backend()
+        self.backend = Backend(self.solr_endpoint, self.solr_schema)
         
     def _unique_id(self, resource):
         project_id = os.path.split(self.env.path)[1]
@@ -201,7 +216,8 @@ class FullTextSearch(Component):
         self.log.debug("get_search_result called")
         if not 'fulltext' in filters:
             return
-        si = sunburnt.SolrInterface("http://localhost:8080/solr","/etc/solr/conf/schema.xml")
+        si = sunburnt.SolrInterface(self.solr_endpoint,
+                                    self.solr_schema)
 #        import pdb;pdb.set_trace()
         
         if self._has_wildcard(terms):
