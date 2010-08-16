@@ -222,7 +222,7 @@ class FullTextSearch(Component):
         
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
-            result = si.query(terms[0]).execute().result
+            result = si.query(terms).execute().result
         else:
             result = si.search(q=terms,qt="dismax").result
 #        The events returned by this function must be tuples of the form
@@ -236,7 +236,8 @@ class FullTextSearch(Component):
             for doc in result.docs:
                 date = doc.get('changed', None)
                 if date is not None:
-                    date = date._dt_obj.replace(tzinfo=datefmt.localtz)
+                    date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
+#                    date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
                 (proj,realm,rid) = doc['id'].split('.')
                 href = req.href(realm, rid)
                 tmp = (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
