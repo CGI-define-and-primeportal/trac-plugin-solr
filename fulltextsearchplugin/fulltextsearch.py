@@ -1,11 +1,13 @@
 from Queue import Queue
 import os
 from genshi.builder import tag
+from datetime import datetime
 
 from trac.core import Component, implements, TracError, Interface
 from trac.web.chrome import add_stylesheet
 from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
 from trac.wiki.api import IWikiChangeListener
+from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener
 from trac.versioncontrol.api import IRepositoryChangeListener
 from trac.core import ExtensionPoint
@@ -13,6 +15,7 @@ from trac.resource import get_resource_name, get_resource_shortname
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _, tag_
 from trac.config import Option
+from trac.util import datefmt
 
 from pkg_resources import resource_filename
 import re
@@ -50,12 +53,12 @@ class Backend(Queue):
         self.put(item)
         self.commit()
         
-    def modify(self, id, item):
+    def modify(self, item):
         item.action = 'MODIFY'
         self.put(item)
         self.commit()
     
-    def delete(self, id, item):
+    def delete(self, item):
         item.action = 'DELETE'
         self.put(item)
         self.commit()
@@ -64,7 +67,13 @@ class Backend(Queue):
         s = sunburnt.SolrInterface(self.solr_endpoint,
                                    self.solr_schema)
         try:
-            s.add(self.get()) #We can add multiple documents if we want
+            item = self.get()
+            if item.action in ('CREATE', 'MODIFY'):
+                s.add(item) #We can add multiple documents if we want
+            elif item.action == 'DELETE':
+                s.delete(item)
+            else:
+                raise Exception("Unknown solr action")
             s.commit()
         except Exception, e:
 #            import pdb;pdb.set_trace()
@@ -104,7 +113,7 @@ class FullTextSearch(Component):
                         'message':ticketsystem.get_resource_description(ticket.resource, format='summary')}
         so.author = ticket.values.get('reporter',None)
         so.changed = ticket.values.get('changetime', None)
-        so.created = ticket.values.get('changetime', None)
+        so.created = ticket.values.get('time', None)
         so.realm = ticket.resource.realm
         so.tags = ticket.values.get('keywords', None)
         so.involved = 'cc' in ticket.values and re.split(r'[;,\s]+', ticket.values['cc'])
@@ -112,18 +121,12 @@ class FullTextSearch(Component):
             so.involved = so.author
         so.popularity = 0 #FIXME
         so.oneline = shorten_result(ticket.values.get('description', ''))
-        so.body = repr(ticket.values)
+        so.body = repr(ticket.values) + ' '.join([t[4] for t in ticket.get_changelog()])
         self.backend.create(so)
         self.log.debug("Ticket added for indexing: %s %s"%(ticket,so))
         
     def ticket_changed(self, ticket, comment, author, old_values):
-        so = FullTextSearchObject(self._unique_id(ticket.resource))
-        so.changed = ticket.values.get('changetime', None)
-        so.tags = ticket.values.get('keywords', None)
-        so.involved = ()#FIXME
-        so.popularity = 0 #FIXME
-        self.backend.modify(self, so)
-        self.log.debug("Ticket changed; updating full text index: %s %s"%(ticket,so))
+        self.ticket_created(ticket)
 
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self._unique_id(ticket.resource))
@@ -133,23 +136,21 @@ class FullTextSearch(Component):
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
         so = FullTextSearchObject(self._unique_id(page.resource))
+        so.title = '%s: %s' % (page.name, shorten_line(page.text))
         so.author = page.author
         so.changed = page.time
-        so.created = page.time
+        so.created = page.time #FIXME get time for version 1
         so.realm = page.resource.realm
-        so.tags = None #FIXME
-        so.involved = () #FIXME
+        so.tags = None #FIXME 
+        so.involved = () #FIXME get author and comment authors
         so.popularity = 0 #FIXME
+        so.oneline = shorten_result(page.text)
+        so.body = page.text #FIXME add comments as well
         self.backend.create(so)
         self.log.debug("WikiPage created for indexing: %s %s"%(page, so))
         
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
-        so = FullTextSearchObject(self._unique_id(page.resource))
-        so.changed = page.t
-        so.tags = None #FIXME
-        so.involved = () #FIXME author change
-        self.backend.create(so)
-        self.log.debug("WikiPage changed; updating full text index: %s %s"%(page, so))
+        self.wiki_page_added(page)
 
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self._unique_id(page.resource))
@@ -160,9 +161,10 @@ class FullTextSearch(Component):
         pass
 
     def wiki_page_renamed(page, old_name): 
-#        so = FullTextSearchObject(page.resource.get_unique_id())
-        #delete and create
-        pass #FIXME
+        so = FullTextSearchObject(self_unique_id(page.resource))
+        so.id = so.id.replace(page.name, old_name) #FIXME, can mess up
+        self.backend.delete(so)
+        self.wiki_page.added(page)
 
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
@@ -179,7 +181,17 @@ class FullTextSearch(Component):
     
     #IMilestoneChangeListener methods
     def milestone_created(self, milestone):
-        pass
+        so = FullTextSearchObject(self._unique_id(milestone.resource))
+#        import pdb;pdb.set_trace()
+        so.title = '%s: %s' % (milestone.name, shorten_line(milestone.description))
+        so.changed = (milestone.completed or milestone.due or datetime.now(datefmt.utc))
+        so.realm = milestone.resource.realm
+        so.involved = () #FIXME 
+        so.popularity = 0 #FIXME
+        so.oneline = shorten_result(milestone.description)
+        so.body = milestone.description #FIXME add comments as well
+        self.backend.create(so)
+        self.log.debug("Milestone created for indexing: %s %s"%(milestone, so))
 
     def milestone_changed(self, milestone, old_values):
         """
@@ -187,11 +199,12 @@ class FullTextSearch(Component):
         milestone properties that changed. Currently those properties can be
         'name', 'due', 'completed', or 'description'.
         """
-        pass
+        self.milestone_created(milestone)
 
     def milestone_deleted(self, milestone):
         """Called when a milestone is deleted."""
-        pass
+        so = FullTextSearchObject(self._unique_id(milestone.resource))
+        self.backend.delete(so)
     
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
@@ -216,10 +229,7 @@ class FullTextSearch(Component):
         self.log.debug("get_search_result called")
         if not 'fulltext' in filters:
             return
-        si = sunburnt.SolrInterface(self.solr_endpoint,
-                                    self.solr_schema)
-#        import pdb;pdb.set_trace()
-        
+        si = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
             result = si.query(terms).execute().result
@@ -227,11 +237,6 @@ class FullTextSearch(Component):
             result = si.search(q=terms,qt="dismax").result
 #        The events returned by this function must be tuples of the form
 #        `(href, title, date, author, excerpt).`
-        res = []
-
-        from datetime import datetime
-        from trac.util import datefmt
-        
         if result.numFound:
             for doc in result.docs:
                 date = doc.get('changed', None)
@@ -242,6 +247,7 @@ class FullTextSearch(Component):
                 href = req.href(realm, rid)
                 tmp = (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
                 yield tmp
+                
     def _has_wildcard(self, terms):
         for term in terms:
             if '*' in term:
