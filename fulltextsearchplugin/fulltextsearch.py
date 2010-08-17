@@ -9,7 +9,7 @@ from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, Tic
 from trac.wiki.api import IWikiChangeListener
 from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener
-from trac.versioncontrol.api import IRepositoryChangeListener
+from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
 from trac.core import ExtensionPoint
 from trac.resource import get_resource_name, get_resource_shortname
 from trac.search import ISearchSource, shorten_result
@@ -33,11 +33,15 @@ class FullTextSearchObject(object):
     involved   = None
     popularity = None
     body       = None
+    action     = None
 
+    CREATE     = 'CREATE'
+    MODIFY     = 'MODIFY'
+    DELETE     = 'DELETE'
+    
     def __init__(self, id, **kwargs):
         self.id = id
-#        self.__dict__.update(kwargs)
-    
+
 
 class Backend(Queue):
     """
@@ -63,20 +67,29 @@ class Backend(Queue):
         self.put(item)
         self.commit()
         
+    def add(self, item):
+        if isinstance(item, list):
+            for i in item:
+                self.put(i)
+        else:
+            self.put(item)
+        self.commit()
+            
     def commit(self):
-        s = sunburnt.SolrInterface(self.solr_endpoint,
-                                   self.solr_schema)
         try:
-            item = self.get()
-            if item.action in ('CREATE', 'MODIFY'):
-                s.add(item) #We can add multiple documents if we want
-            elif item.action == 'DELETE':
-                s.delete(item)
-            else:
-                raise Exception("Unknown solr action")
-            s.commit()
+            s = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
+            while not self.empty():
+                item = self.get()
+                if item.action in (FullTextSearchObject.CREATE, 
+                                   FullTextSearchObject.MODIFY):
+                    s.add(item) #We can add multiple documents if we want
+                elif item.action == 'DELETE':
+                    s.delete(item)
+                else:
+                    raise Exception("Unknown solr action")
+                s.commit()
         except Exception, e:
-#            import pdb;pdb.set_trace()
+    #            import pdb;pdb.set_trace()
             pass
         
 
@@ -99,9 +112,13 @@ class FullTextSearch(Component):
     def __init__(self):
         self.backend = Backend(self.solr_endpoint, self.solr_schema)
         
-    def _unique_id(self, resource):
+    def _unique_id(self, resource = None, realm = None, id = None):
         project_id = os.path.split(self.env.path)[1]
-        unique_id = u"%s.%s.%s"%(project_id, resource.realm, resource.id)
+        import pdb;pdb.set_trace()
+        if resource:
+            id = resource.id
+            realm = resource.realm
+        unique_id = u"%s.%s.%s"%(project_id, realm, id)
         return unique_id
     
     # ITicketChangeListener methods
@@ -205,12 +222,43 @@ class FullTextSearch(Component):
         """Called when a milestone is deleted."""
         so = FullTextSearchObject(self._unique_id(milestone.resource))
         self.backend.delete(so)
-    
+        
+    def _fill_so(self, node):
+        so = FullTextSearchObject(self._unique_id(realm='versioncontrol', id=node.path))
+        so.title   = node.path
+        so.body    = node.get_content().read().decode('utf-8')
+        so.changed = node.get_last_modified()
+        so.action  = so.CREATE
+        return so
+
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
-        pass
-
+        sos = []
+        import pdb;pdb.set_trace()
+        for (path, kind, action, base_path, base_rev) in changeset.get_changes():
+            #FIXME handle kind == Node.DIRECTORY
+            if action == Changeset.ADD:
+                so = self._fill_so(repos.get_node(path, changeset.rev))
+                sos.append(so)
+            elif action == Changeset.EDIT:
+                so = self._fill_so(repos.get_node(path, changeset.rev))
+                sos.append(so)
+            elif action == Changeset.MOVE:
+                so = FullTextSearchObject(realm='versioncontrol', id=base_path)
+                so.action = so.DELETE
+                sos.append(so)
+                so = self._fill_so(repos.get_node(path, changeset.rev))
+                sos.append(sos)
+            elif action == Changeset.COPY:
+                so = self._fill_so(repos.get_node(path, changeset.rev))
+                sos.append(sos)
+            elif action == Changeset.DELETE:
+                so = FullTextSearchObject(realm='versioncontrol', id=path)
+                so.action = so.DELETE
+                sos.append(sos)
+        self.backend.add(sos)
+        
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
        
@@ -229,7 +277,10 @@ class FullTextSearch(Component):
         self.log.debug("get_search_result called")
         if not 'fulltext' in filters:
             return
-        si = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
+        try:
+            si = sunburnt.SolrInterface(self.solr_endpoint, "asd"+self.solr_schema)
+        except:
+            return #until solr is packaged 
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
             result = si.query(terms).execute().result
@@ -243,7 +294,8 @@ class FullTextSearch(Component):
                 if date is not None:
                     date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
 #                    date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
-                (proj,realm,rid) = doc['id'].split('.')
+                
+                (proj,realm,rid) = doc['id'].split('.', 2)
                 href = req.href(realm, rid)
                 tmp = (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
                 yield tmp
