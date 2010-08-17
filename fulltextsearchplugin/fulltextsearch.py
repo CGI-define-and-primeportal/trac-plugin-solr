@@ -278,7 +278,7 @@ class FullTextSearch(Component):
         if not 'fulltext' in filters:
             return
         try:
-            si = sunburnt.SolrInterface(self.solr_endpoint, "asd"+self.solr_schema)
+            si = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
         except:
             return #until solr is packaged 
         if self._has_wildcard(terms):
