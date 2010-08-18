@@ -53,17 +53,17 @@ class Backend(Queue):
         self.solr_schema   = solr_schema
     
     def create(self, item):
-        item.action = 'CREATE'
+        item.action = item.CREATE
         self.put(item)
         self.commit()
         
     def modify(self, item):
-        item.action = 'MODIFY'
+        item.action = item.MODIFY
         self.put(item)
         self.commit()
     
     def delete(self, item):
-        item.action = 'DELETE'
+        item.action = item.DELETE
         self.put(item)
         self.commit()
         
@@ -83,13 +83,12 @@ class Backend(Queue):
                 if item.action in (FullTextSearchObject.CREATE, 
                                    FullTextSearchObject.MODIFY):
                     s.add(item) #We can add multiple documents if we want
-                elif item.action == 'DELETE':
+                elif item.action == FullTextSearchObject.DELETE:
                     s.delete(item)
                 else:
                     raise Exception("Unknown solr action")
                 s.commit()
         except Exception, e:
-    #            import pdb;pdb.set_trace()
             pass
         
 
@@ -114,7 +113,6 @@ class FullTextSearch(Component):
         
     def _unique_id(self, resource = None, realm = None, id = None):
         project_id = os.path.split(self.env.path)[1]
-        import pdb;pdb.set_trace()
         if resource:
             id = resource.id
             realm = resource.realm
@@ -186,20 +184,30 @@ class FullTextSearch(Component):
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
         """Called when an attachment is added."""
-        pass
+        so = FullTextSearchObject(self._unique_id(attachment.resource))
+        so.realm = attachment.resource.realm
+        so.title = attachment.title
+        so.author = attachment.author
+        so.changed = attachment.date
+        so.created = attachment.date
+        so.body = attachment.open().read().decode('utf-8') + attachment.description
+        so.oneline = shorten_line(so.body)
+        so.involved = attachment.author
+        self.backend.create(so)
+        
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
-        pass
+        so = FullTextSearchObject(self._unique_id(attachment.resource))
+        self.backend.delete(so)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
-        pass
+        self.attachment_added(attachment)
     
     #IMilestoneChangeListener methods
     def milestone_created(self, milestone):
         so = FullTextSearchObject(self._unique_id(milestone.resource))
-#        import pdb;pdb.set_trace()
         so.title = '%s: %s' % (milestone.name, shorten_line(milestone.description))
         so.changed = (milestone.completed or milestone.due or datetime.now(datefmt.utc))
         so.realm = milestone.resource.realm
@@ -235,22 +243,15 @@ class FullTextSearch(Component):
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
         sos = []
-        import pdb;pdb.set_trace()
         for (path, kind, action, base_path, base_rev) in changeset.get_changes():
             #FIXME handle kind == Node.DIRECTORY
-            if action == Changeset.ADD:
-                so = self._fill_so(repos.get_node(path, changeset.rev))
-                sos.append(so)
-            elif action == Changeset.EDIT:
+            if action in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif action == Changeset.MOVE:
                 so = FullTextSearchObject(realm='versioncontrol', id=base_path)
                 so.action = so.DELETE
                 sos.append(so)
-                so = self._fill_so(repos.get_node(path, changeset.rev))
-                sos.append(sos)
-            elif action == Changeset.COPY:
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(sos)
             elif action == Changeset.DELETE:
@@ -294,7 +295,6 @@ class FullTextSearch(Component):
                 if date is not None:
                     date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
 #                    date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
-                
                 (proj,realm,rid) = doc['id'].split('.', 2)
                 href = req.href(realm, rid)
                 tmp = (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
