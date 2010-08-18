@@ -38,7 +38,7 @@ class FullTextSearchObject(object):
     CREATE     = 'CREATE'
     MODIFY     = 'MODIFY'
     DELETE     = 'DELETE'
-    
+
     def __init__(self, id, **kwargs):
         self.id = id
 
@@ -51,7 +51,7 @@ class Backend(Queue):
         Queue.__init__(self)
         self.solr_endpoint = solr_endpoint
         self.solr_schema   = solr_schema
-    
+
     def create(self, item):
         item.action = item.CREATE
         self.put(item)
@@ -66,7 +66,7 @@ class Backend(Queue):
         item.action = item.DELETE
         self.put(item)
         self.commit()
-        
+
     def add(self, item):
         if isinstance(item, list):
             for i in item:
@@ -74,7 +74,7 @@ class Backend(Queue):
         else:
             self.put(item)
         self.commit()
-            
+
     def commit(self):
         try:
             s = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
@@ -90,9 +90,8 @@ class Backend(Queue):
                 s.commit()
         except Exception, e:
             pass
-        
 
-        
+
 class FullTextSearch(Component):
     """Search all ChangeListeners and prepare the output for a full text 
        backend."""
@@ -107,7 +106,7 @@ class FullTextSearch(Component):
     solr_schema = Option("search", "solr_schema",
                          default="/etc/solr/conf/schema.xml",
                          doc="Path to Solr schema XML")
-    
+
     def __init__(self):
         self.backend = Backend(self.solr_endpoint, self.solr_schema)
         
@@ -118,7 +117,7 @@ class FullTextSearch(Component):
             realm = resource.realm
         unique_id = u"%s.%s.%s"%(project_id, realm, id)
         return unique_id
-    
+
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
         ticketsystem = TicketSystem(self.env)
@@ -147,7 +146,7 @@ class FullTextSearch(Component):
         so = FullTextSearchObject(self._unique_id(ticket.resource))
         self.backend.delete(so)
         self.log.debug("Ticket deleted; deleting from index: %s %s"%(ticket,so))
-        
+
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
         so = FullTextSearchObject(self._unique_id(page.resource))
@@ -163,14 +162,14 @@ class FullTextSearch(Component):
         so.body = page.text #FIXME add comments as well
         self.backend.create(so)
         self.log.debug("WikiPage created for indexing: %s %s"%(page, so))
-        
+
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
         self.wiki_page_added(page)
 
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self._unique_id(page.resource))
         self.backend.delete(so)
-        
+
     def wiki_page_version_deleted(self, page):
         #We don't care about old versions
         pass
@@ -184,7 +183,10 @@ class FullTextSearch(Component):
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
         """Called when an attachment is added."""
-        so = FullTextSearchObject(self._unique_id(attachment.resource))
+        realm = u"%s:%s:%s" % (attachment.resource.realm, 
+                               attachment.parent_realm, 
+                               attachment.parent_id)
+        so = FullTextSearchObject(self._unique_id(realm=realm, id=attachment.resource.id))
         so.realm = attachment.resource.realm
         so.title = attachment.title
         so.author = attachment.author
@@ -194,7 +196,6 @@ class FullTextSearch(Component):
         so.oneline = shorten_line(so.body)
         so.involved = attachment.author
         self.backend.create(so)
-        
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
@@ -204,7 +205,7 @@ class FullTextSearch(Component):
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
         self.attachment_added(attachment)
-    
+
     #IMilestoneChangeListener methods
     def milestone_created(self, milestone):
         so = FullTextSearchObject(self._unique_id(milestone.resource))
@@ -230,13 +231,14 @@ class FullTextSearch(Component):
         """Called when a milestone is deleted."""
         so = FullTextSearchObject(self._unique_id(milestone.resource))
         self.backend.delete(so)
-        
+
     def _fill_so(self, node):
-        so = FullTextSearchObject(self._unique_id(realm='versioncontrol', id=node.path))
+        so = FullTextSearchObject(self._unique_id(realm='browser', id=node.path))
         so.title   = node.path
         so.body    = node.get_content().read().decode('utf-8')
         so.changed = node.get_last_modified()
         so.action  = so.CREATE
+        so.oneline = shorten_line(so.body)
         return so
 
     #IRepositoryChangeListener methods
@@ -249,24 +251,25 @@ class FullTextSearch(Component):
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif action == Changeset.MOVE:
-                so = FullTextSearchObject(realm='versioncontrol', id=base_path)
+                so = FullTextSearchObject(realm='browser', id=base_path)
                 so.action = so.DELETE
                 sos.append(so)
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(sos)
             elif action == Changeset.DELETE:
-                so = FullTextSearchObject(realm='versioncontrol', id=path)
+                so = FullTextSearchObject(realm='browser', id=path)
                 so.action = so.DELETE
                 sos.append(sos)
         self.backend.add(sos)
-        
+
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
-       
+
         The `old_changeset` argument contains the metadata of the changeset
         prior to the modification. It is `None` if the old metadata cannot
         be retrieved.
         """
+        #Hmm, I wonder if this is called instead of the above method or after
         pass
 
     # ISearchSource methods.
@@ -287,19 +290,20 @@ class FullTextSearch(Component):
             result = si.query(terms).execute().result
         else:
             result = si.search(q=terms,qt="dismax").result
-#        The events returned by this function must be tuples of the form
-#        `(href, title, date, author, excerpt).`
-        if result.numFound:
-            for doc in result.docs:
-                date = doc.get('changed', None)
-                if date is not None:
-                    date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
-#                    date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
-                (proj,realm,rid) = doc['id'].split('.', 2)
+        for doc in result.docs:
+            date = doc.get('changed', None)
+            if date is not None:
+                date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
+                #date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
+            (proj,realm,rid) = doc['id'].split('.', 2)
+            if realm == 'versioncontrol':
+                href = req.href('browser', rid)
+            elif 'attachment:' in realm:    #FIXME hacky stuff here
+                href = req.href(realm.replace(':','/'), rid)
+            else:
                 href = req.href(realm, rid)
-                tmp = (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
-                yield tmp
-                
+            yield (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
+
     def _has_wildcard(self, terms):
         for term in terms:
             if '*' in term:
