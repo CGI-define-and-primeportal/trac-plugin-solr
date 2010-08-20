@@ -2,24 +2,25 @@ from Queue import Queue
 import os
 from genshi.builder import tag
 from datetime import datetime
+import re
+import sunburnt
 
+from trac.admin import AdminCommandError, IAdminCommandProvider
 from trac.core import Component, implements, TracError, Interface
 from trac.web.chrome import add_stylesheet
 from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
-from trac.wiki.api import IWikiChangeListener
+from trac.ticket.model import Ticket, Milestone
+from trac.wiki.api import IWikiChangeListener, WikiSystem
+from trac.wiki.model import WikiPage
 from trac.util.text import shorten_line
-from trac.attachment import IAttachmentChangeListener
-from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
+from trac.attachment import IAttachmentChangeListener, Attachment
+from trac.versioncontrol.api import IRepositoryChangeListener, Changeset, Node
 from trac.core import ExtensionPoint
 from trac.resource import get_resource_name, get_resource_shortname
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _, tag_
 from trac.config import Option
 from trac.util import datefmt
-
-from pkg_resources import resource_filename
-import re
-import sunburnt
 
 class FullTextSearchObject(object):
 
@@ -74,6 +75,11 @@ class Backend(Queue):
         else:
             self.put(item)
         self.commit()
+        
+    def empty_proj(self, project_id):
+        s = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
+        s.delete(queries = "id:%s.*"%project_id) #I would have like some more info back
+        s.commit()
 
     def commit(self):
         try:
@@ -97,7 +103,7 @@ class FullTextSearch(Component):
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener, ISearchSource)
+               IRepositoryChangeListener, ISearchSource, IAdminCommandProvider)
 
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8080/solr",
@@ -117,6 +123,61 @@ class FullTextSearch(Component):
             realm = resource.realm
         unique_id = u"%s.%s.%s"%(project_id, realm, id)
         return unique_id
+    
+    def _reindex_svn(self):
+        class MockChangeset(list):
+            def get_changes(self):
+                return self
+        repo = self.env.get_repository()
+        mc = MockChangeset()
+        mc.rev = repo.youngest_rev
+        for path in repo.traverse():
+            if path.endswith('/'):
+                continue
+            mc.append((path, Node.FILE, Changeset.ADD, None, -1))
+        self.changeset_added(repo, mc)
+        return len(mc)
+
+    def _reindex_wiki(self):
+        for name in WikiSystem(self.env).get_pages():
+            page = WikiPage(self.env, name)
+            self.wiki_page_added(page)
+
+    def _reindex_attachment(self):
+        db = self.env.get_db_cnx()
+        cursor = db.cursor()
+        cursor.execute("SELECT type,id,filename,description,size,time,author,ipnr "
+                       "FROM attachment")
+        for parent_realm, parent_id, filename, description, size, time, author, ipnr in cursor:
+            attachment = Attachment(self.env, parent_realm, parent_id)
+            attachment.filename = filename
+            attachment.description = description
+            attachment.size = size and int(size) or 0
+            attachment.date = datefmt.from_utimestamp(time or 0)
+            attachment.author = author
+            attachment.ipnr = ipnr
+            self.attachment_added(attachment)
+
+    def _reindex_ticket(self):
+        db = self.env.get_db_cnx()
+        cursor = db.cursor()
+        cursor.execute("SELECT id FROM ticket")
+        for (id,) in cursor:
+            self.ticket_created(Ticket(self.env, id))
+
+    def _reindex_milestone(self):
+        for milestone in Milestone.select(self.env):
+            self.milestone_created(milestone)
+            
+    def reindex(self):
+        project_id = os.path.split(self.env.path)[1]
+        self.backend.empty_proj(project_id)
+        num_milestone = self._reindex_milestone()
+        num_tickets = self._reindex_ticket()
+        num_attachement = self._reindex_attachment()
+        num_svn = self._reindex_svn()
+        num_wiki = self._reindex_wiki()
+        return num_svn
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
@@ -161,7 +222,7 @@ class FullTextSearch(Component):
         so.oneline = shorten_result(page.text)
         so.body = page.text #FIXME add comments as well
         self.backend.create(so)
-        self.log.debug("WikiPage created for indexing: %s %s"%(page, so))
+        self.log.debug("WikiPage created for indexing: %s %s"%(page.name, so))
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
         self.wiki_page_added(page)
@@ -303,9 +364,22 @@ class FullTextSearch(Component):
             else:
                 href = req.href(realm, rid)
             yield (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
-
+    #IAdminCommandProvider methods
     def _has_wildcard(self, terms):
         for term in terms:
             if '*' in term:
                 return True
         return False
+    
+    def get_admin_commands(self):
+        yield ('fulltext reindex', '',
+               'Throw away everything in text index and add it again',
+               self._complete_admin_command, self._admin_reindex)
+
+    def _complete_admin_command(self, args):
+        return []
+
+    def _admin_reindex(self):
+        num = self.reindex()
+        print "%d files added for reindexing."%num
+
