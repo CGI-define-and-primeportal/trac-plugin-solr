@@ -21,6 +21,14 @@ from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _, tag_
 from trac.config import Option
 from trac.util import datefmt
+from trac.search.web_ui import SearchModule
+
+    
+class IFullTextSearchSource(ISearchSource):
+    pass
+
+class FullTextSearchModule(SearchModule):
+    search_sources = ExtensionPoint(IFullTextSearchSource)
 
 class FullTextSearchObject(object):
 
@@ -103,7 +111,7 @@ class FullTextSearch(Component):
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener, ISearchSource, IAdminCommandProvider)
+               IRepositoryChangeListener, IFullTextSearchSource, IAdminCommandProvider)
 
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8080/solr",
@@ -115,7 +123,7 @@ class FullTextSearch(Component):
 
     def __init__(self):
         self.backend = Backend(self.solr_endpoint, self.solr_schema)
-        
+
     def _unique_id(self, resource = None, realm = None, id = None):
         project_id = os.path.split(self.env.path)[1]
         if resource:
@@ -294,8 +302,9 @@ class FullTextSearch(Component):
         self.backend.delete(so)
 
     def _fill_so(self, node):
-        so = FullTextSearchObject(self._unique_id(realm='browser', id=node.path))
+        so = FullTextSearchObject(self._unique_id(realm='versioncontrol', id=node.path))
         so.title   = node.path
+        so.realm   = 'versioncontrol'
         so.body    = node.get_content().read().decode('utf-8')
         so.changed = node.get_last_modified()
         so.action  = so.CREATE
@@ -312,13 +321,13 @@ class FullTextSearch(Component):
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif action == Changeset.MOVE:
-                so = FullTextSearchObject(realm='browser', id=base_path)
+                so = FullTextSearchObject(realm='versioncontrol', id=base_path)
                 so.action = so.DELETE
                 sos.append(so)
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(sos)
             elif action == Changeset.DELETE:
-                so = FullTextSearchObject(realm='browser', id=path)
+                so = FullTextSearchObject(realm='versioncontrol', id=path)
                 so.action = so.DELETE
                 sos.append(sos)
         self.backend.add(sos)
@@ -336,22 +345,46 @@ class FullTextSearch(Component):
     # ISearchSource methods.
 
     def get_search_filters(self, req):
-        yield ('fulltext', 'Full text search', True)
+        yield ('ticket', 'Tickets', True)
+        yield ('wiki', 'Wiki', True)
+        yield ('milestone', 'Milestones', True)
+        yield ('changeset', 'Changesets', True)
+        yield ('versioncontrol', 'Subversion archive', True)
+        yield ('attachment', 'Attachments', True)
+
+    def _build_filter_query(self, si, filters):
+        Q = si.query().Q
+        my_filters = filters[:]
+        for field in my_filters:
+            if field not in [shortname for (shortname,t2,t3) in self.get_search_filters(None)]:
+                my_filters.remove(field)
+        def rec(list1):
+            if len(list1) > 2:
+                return Q(realm=list1.pop()) | rec(list1)
+            elif len(list1) == 2:
+                return Q(realm=list1.pop()) | Q(realm=list1.pop())
+            elif len(list1) == 1:
+                return Q(realm=list1.pop())
+            else: 
+                return ""
+        return rec(my_filters[:])
 
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
-        if not 'fulltext' in filters:
-            return
         try:
             si = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
         except:
             return #until solr is packaged 
+        filter_q = self._build_filter_query(si, filters)
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
-            result = si.query(terms).execute().result
+            result = si.query(terms).filter(filter_q).facet_by('realm').execute()
         else:
-            result = si.search(q=terms,qt="dismax").result
-        for doc in result.docs:
+            opts = {'q':terms,'qt':"dismax", 'facet':True, 'facet.field':"realm",
+                    'fq':filter_q}
+            result = si.search(**opts)
+        self.log.debug(result.facet_counts.facet_fields)
+        for doc in result.result.docs:
             date = doc.get('changed', None)
             if date is not None:
                 date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
@@ -364,13 +397,13 @@ class FullTextSearch(Component):
             else:
                 href = req.href(realm, rid)
             yield (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
-    #IAdminCommandProvider methods
+
     def _has_wildcard(self, terms):
         for term in terms:
             if '*' in term:
                 return True
         return False
-    
+    #IAdminCommandProvider methods
     def get_admin_commands(self):
         yield ('fulltext reindex', '',
                'Throw away everything in text index and add it again',
