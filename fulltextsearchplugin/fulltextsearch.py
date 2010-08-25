@@ -56,10 +56,9 @@ class Backend(Queue):
     """
     """
 
-    def __init__(self, solr_endpoint, solr_schema):
+    def __init__(self, solr_endpoint):
         Queue.__init__(self)
         self.solr_endpoint = solr_endpoint
-        self.solr_schema   = solr_schema
 
     def create(self, item):
         item.action = item.CREATE
@@ -85,25 +84,26 @@ class Backend(Queue):
         self.commit()
         
     def empty_proj(self, project_id):
-        s = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
+        s = sunburnt.SolrInterface(self.solr_endpoint)
         s.delete(queries = "id:%s.*"%project_id) #I would have like some more info back
         s.commit()
 
     def commit(self):
-        try:
-            s = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
-            while not self.empty():
-                item = self.get()
-                if item.action in (FullTextSearchObject.CREATE, 
-                                   FullTextSearchObject.MODIFY):
-                    s.add(item) #We can add multiple documents if we want
-                elif item.action == FullTextSearchObject.DELETE:
-                    s.delete(item)
+        s = sunburnt.SolrInterface(self.solr_endpoint)
+        while not self.empty():
+            item = self.get()
+            if item.action in (FullTextSearchObject.CREATE, 
+                               FullTextSearchObject.MODIFY):
+                if hasattr(item.body, 'read'):
+                    s.add({'filename':item.id, 'file':item.body}, extract=True)
                 else:
-                    raise Exception("Unknown solr action")
-                s.commit()
-        except Exception, e:
-            pass
+                    s.add(item) #We can add multiple documents if we want
+            elif item.action == FullTextSearchObject.DELETE:
+                s.delete(item)
+            else:
+                raise Exception("Unknown solr action")
+            s.commit()
+        
 
 
 class FullTextSearch(Component):
@@ -114,15 +114,12 @@ class FullTextSearch(Component):
                IRepositoryChangeListener, IFullTextSearchSource, IAdminCommandProvider)
 
     solr_endpoint = Option("search", "solr_endpoint",
-                           default="http://localhost:8080/solr",
+                           default="http://localhost:8983/solr/",
                            doc="URL to use for HTTP REST calls to Solr")
-
-    solr_schema = Option("search", "solr_schema",
-                         default="/etc/solr/conf/schema.xml",
-                         doc="Path to Solr schema XML")
-
+    #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
+    #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
-        self.backend = Backend(self.solr_endpoint, self.solr_schema)
+        self.backend = Backend(self.solr_endpoint)
 
     def _unique_id(self, resource = None, realm = None, id = None):
         project_id = os.path.split(self.env.path)[1]
@@ -206,7 +203,7 @@ class FullTextSearch(Component):
         so.oneline = shorten_result(ticket.values.get('description', ''))
         so.body = repr(ticket.values) + ' '.join([t[4] for t in ticket.get_changelog()])
         self.backend.create(so)
-        self.log.debug("Ticket added for indexing: %s %s"%(ticket,so))
+        self.log.debug("Ticket added for indexing: %s"%(ticket))
         
     def ticket_changed(self, ticket, comment, author, old_values):
         self.ticket_created(ticket)
@@ -214,7 +211,7 @@ class FullTextSearch(Component):
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self._unique_id(ticket.resource))
         self.backend.delete(so)
-        self.log.debug("Ticket deleted; deleting from index: %s %s"%(ticket,so))
+        self.log.debug("Ticket deleted; deleting from index: %s"%(ticket))
 
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
@@ -230,7 +227,7 @@ class FullTextSearch(Component):
         so.oneline = shorten_result(page.text)
         so.body = page.text #FIXME add comments as well
         self.backend.create(so)
-        self.log.debug("WikiPage created for indexing: %s %s"%(page.name, so))
+        self.log.debug("WikiPage created for indexing: %s"%(page.name))
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
         self.wiki_page_added(page)
@@ -261,8 +258,7 @@ class FullTextSearch(Component):
         so.author = attachment.author
         so.changed = attachment.date
         so.created = attachment.date
-        so.body = attachment.open().read().decode('utf-8') + attachment.description
-        so.oneline = shorten_line(so.body)
+        so.body = attachment.open()
         so.involved = attachment.author
         self.backend.create(so)
 
@@ -286,7 +282,7 @@ class FullTextSearch(Component):
         so.oneline = shorten_result(milestone.description)
         so.body = milestone.description #FIXME add comments as well
         self.backend.create(so)
-        self.log.debug("Milestone created for indexing: %s %s"%(milestone, so))
+        self.log.debug("Milestone created for indexing: %s"%(milestone))
 
     def milestone_changed(self, milestone, old_values):
         """
@@ -305,10 +301,9 @@ class FullTextSearch(Component):
         so = FullTextSearchObject(self._unique_id(realm='versioncontrol', id=node.path))
         so.title   = node.path
         so.realm   = 'versioncontrol'
-        so.body    = node.get_content().read().decode('utf-8')
+        so.body    = node.get_content()
         so.changed = node.get_last_modified()
         so.action  = so.CREATE
-        so.oneline = shorten_line(so.body)
         return so
 
     #IRepositoryChangeListener methods
@@ -330,6 +325,8 @@ class FullTextSearch(Component):
                 so = FullTextSearchObject(realm='versioncontrol', id=path)
                 so.action = so.DELETE
                 sos.append(sos)
+        for so in sos:
+            self.log.debug("Indexing: %s"%so.title)
         self.backend.add(sos)
 
     def changeset_modified(self, repos, changeset, old_changeset):
@@ -372,7 +369,7 @@ class FullTextSearch(Component):
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
         try:
-            si = sunburnt.SolrInterface(self.solr_endpoint, self.solr_schema)
+            si = sunburnt.SolrInterface(self.solr_endpoint)
         except:
             return #until solr is packaged 
         filter_q = self._build_filter_query(si, filters)
@@ -413,6 +410,6 @@ class FullTextSearch(Component):
         return []
 
     def _admin_reindex(self):
-        num = self.reindex()
-        print "%d files added for reindexing."%num
+        self.reindex()
+        print "reindex done"
 
