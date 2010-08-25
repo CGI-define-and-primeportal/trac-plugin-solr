@@ -95,7 +95,12 @@ class Backend(Queue):
             if item.action in (FullTextSearchObject.CREATE, 
                                FullTextSearchObject.MODIFY):
                 if hasattr(item.body, 'read'):
-                    s.add({'filename':item.id, 'file':item.body}, extract=True)
+                    item.author = None # As this could come from the
+                                       # document, although probably
+                                       # we should make the schema
+                                       # much more multi-valued
+                    item.title = None                   
+                    s.add(item, extract=True)
                 else:
                     s.add(item) #We can add multiple documents if we want
             elif item.action == FullTextSearchObject.DELETE:
@@ -380,7 +385,7 @@ class FullTextSearch(Component):
             opts = {'q':terms,'qt':"dismax", 'facet':True, 'facet.field':"realm",
                     'fq':filter_q}
             result = si.search(**opts)
-        self.log.debug(result.facet_counts.facet_fields)
+        self.log.debug("Facets: %s", result.facet_counts.facet_fields)
         for doc in result.result.docs:
             date = doc.get('changed', None)
             if date is not None:
@@ -393,7 +398,8 @@ class FullTextSearch(Component):
                 href = req.href(realm.replace(':','/'), rid)
             else:
                 href = req.href(realm, rid)
-            yield (href, doc.get('title',''), date, doc.get('author',''), doc.get('oneline',''))
+            # try hard to get some 'title' which is needed for clicking on
+            yield (href, doc.get('title',rid), date, doc.get('author',''), doc.get('oneline',''))
 
     def _has_wildcard(self, terms):
         for term in terms:
