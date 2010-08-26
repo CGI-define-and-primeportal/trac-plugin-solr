@@ -400,9 +400,9 @@
 
 
  <fields>
-   <field name="id" type="string" indexed="true" stored="true" required="true" /> 
-   <field name="title" type="text" indexed="true" stored="true"/>
-   <field name="author" type="text" indexed="true" stored="true"/>
+   <field name="id" type="string" indexed="true" stored="true" required="true"/>
+   <field name="title" type="text" indexed="true" stored="true" multiValued="true"/>
+   <field name="author" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="changed" type="date" indexed="true" stored="true"/>
    <field name="created" type="date" indexed="true" stored="true"/>
    <field name="oneline" type="text_rev" indexed="true" stored="true"/>
