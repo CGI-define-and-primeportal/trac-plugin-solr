@@ -401,6 +401,7 @@
 
  <fields>
    <field name="id" type="string" indexed="true" stored="true" required="true"/>
+   <field name="project" type="string" indexed="true" stored="true" required="true"/>
    <field name="title" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="author" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="changed" type="date" indexed="true" stored="true"/>

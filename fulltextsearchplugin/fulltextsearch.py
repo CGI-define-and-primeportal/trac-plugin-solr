@@ -52,7 +52,9 @@ class FullTextSearchObject(object):
 
     def __init__(self, id, **kwargs):
         self.id = id
-
+        # we can't just filter on the first part of id, because
+        # wildcards are not supported by dismax in solr yet
+        self.project = id.split(".",1)[0]
 
 class Backend(Queue):
     """
@@ -366,7 +368,7 @@ class FullTextSearch(Component):
         yield ('wiki', 'Wiki', True)
         yield ('milestone', 'Milestones', True)
         yield ('changeset', 'Changesets', True)
-        yield ('versioncontrol', 'Subversion archive', True)
+        yield ('versioncontrol', 'File archive', True)
         yield ('attachment', 'Attachments', True)
 
     def _build_filter_query(self, si, filters):
@@ -391,8 +393,9 @@ class FullTextSearch(Component):
         try:
             si = sunburnt.SolrInterface(self.solr_endpoint)
         except:
-            return #until solr is packaged 
-        filter_q = self._build_filter_query(si, filters)
+            return #until solr is packaged
+        project_id = os.path.split(self.env.path)[1]        
+        filter_q = self._build_filter_query(si, filters) & si.query().Q(project=project_id)
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
             result = si.query(terms).filter(filter_q).facet_by('realm').execute()
