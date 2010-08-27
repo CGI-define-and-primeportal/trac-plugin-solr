@@ -5,6 +5,7 @@ from datetime import datetime
 import re
 import sunburnt
 
+from trac.env import IEnvironmentSetupParticipant
 from trac.admin import AdminCommandError, IAdminCommandProvider
 from trac.core import Component, implements, TracError, Interface
 from trac.web.chrome import add_stylesheet
@@ -22,7 +23,7 @@ from trac.util.translation import _, tag_
 from trac.config import Option
 from trac.util import datefmt
 from trac.search.web_ui import SearchModule
-
+from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
     
 class IFullTextSearchSource(ISearchSource):
     pass
@@ -116,7 +117,8 @@ class FullTextSearch(Component):
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener, IFullTextSearchSource, IAdminCommandProvider)
+               IRepositoryChangeListener, IFullTextSearchSource, IAdminCommandProvider,
+               IEnvironmentSetupParticipant)
 
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8983/solr/",
@@ -188,6 +190,23 @@ class FullTextSearch(Component):
         num_svn = self._reindex_svn()
         num_wiki = self._reindex_wiki()
         return num_svn
+
+    # IEnvironmentSetupParticipant methods
+    def environment_created(self):
+        pass
+
+    def environment_needs_upgrade(self, db):
+       cursor = db.cursor()
+       cursor.execute("SELECT value FROM system WHERE name = 'fulltextsearch_last_fullindex'")
+       result = cursor.fetchone()
+       if result is None:
+           return True
+
+    def upgrade_environment(self, db):
+        cursor = db.cursor()
+        t = to_utimestamp(datetime.now(utc))
+        cursor.execute("INSERT INTO system (name, value) VALUES ('fulltextsearch_last_fullindex',%s)" % t)
+        self.reindex()
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
