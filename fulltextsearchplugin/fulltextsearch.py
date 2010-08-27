@@ -4,6 +4,7 @@ from genshi.builder import tag
 from datetime import datetime
 import re
 import sunburnt
+import types
 
 from trac.env import IEnvironmentSetupParticipant
 from trac.admin import AdminCommandError, IAdminCommandProvider
@@ -96,11 +97,6 @@ class Backend(Queue):
             if item.action in (FullTextSearchObject.CREATE, 
                                FullTextSearchObject.MODIFY):
                 if hasattr(item.body, 'read'):
-                    item.author = None # As this could come from the
-                                       # document, although probably
-                                       # we should make the schema
-                                       # much more multi-valued
-                    item.title = None                   
                     s.add(item, extract=True)
                 else:
                     s.add(item) #We can add multiple documents if we want
@@ -411,14 +407,25 @@ class FullTextSearch(Component):
                 date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
                 #date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
             (proj,realm,rid) = doc['id'].split('.', 2)
+            # try hard to get some 'title' which is needed for clicking on
+            title   = doc.get('title', rid)
             if realm == 'versioncontrol':
                 href = req.href('browser', rid)
             elif 'attachment:' in realm:    #FIXME hacky stuff here
                 href = req.href(realm.replace(':','/'), rid)
+                # FIXME is there a better way to do this?
+                # FIXME i18n
+                if realm.split(":")[1] == "wiki":
+                    title = "%s (attached to page %s)" % (rid, realm.split(":")[2])
+                if realm.split(":")[1] == "ticket":
+                    title = "%s (attached to ticket #%s)" % (rid, realm.split(":")[2])
             else:
                 href = req.href(realm, rid)
-            # try hard to get some 'title' which is needed for clicking on
-            yield (href, doc.get('title',rid), date, doc.get('author',''), doc.get('oneline',''))
+            author  = doc.get('author','')
+            if isinstance(author,types.ListType):
+                author = ", ".join(author)
+            excerpt = doc.get('oneline','')
+            yield (href, title, date, author, excerpt)
 
     def _has_wildcard(self, terms):
         for term in terms:
