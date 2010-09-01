@@ -262,8 +262,8 @@ class FullTextSearch(Component):
         #We don't care about old versions
         pass
 
-    def wiki_page_renamed(page, old_name): 
-        so = FullTextSearchObject(self_unique_id(page.resource))
+    def wiki_page_renamed(self, page, old_name): 
+        so = FullTextSearchObject(self._unique_id(page.resource))
         so.id = so.id.replace(page.name, old_name) #FIXME, can mess up
         self.backend.delete(so)
         self.wiki_page.added(page)
