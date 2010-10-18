@@ -40,7 +40,7 @@ setup(
     url = "http://define4.trac.uk.logica.com",
     packages = ['fulltextsearchplugin'],
     package_data = {'fulltextsearchplugin' : ['htdocs/js/*.js', 'htdocs/css/*.css']}, 
-    install_requires = ['sunburnt','httplib2'],
+    install_requires = ['sunburnt','lxml','httplib2'],
     entry_points = {
         'trac.plugins': [
             'fulltextsearchplugin.fulltextsearch = fulltextsearchplugin.fulltextsearch',
