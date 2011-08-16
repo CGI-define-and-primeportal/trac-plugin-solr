@@ -195,7 +195,8 @@ class FullTextSearch(Component):
 
     def environment_needs_upgrade(self, db):
        cursor = db.cursor()
-       cursor.execute("SELECT value FROM system WHERE name = 'fulltextsearch_last_fullindex'")
+       cursor.execute("SELECT value FROM system WHERE name = %s",
+                      ('fulltextsearch_last_fullindex',))
        result = cursor.fetchone()
        if result is None:
            return True
@@ -203,7 +204,8 @@ class FullTextSearch(Component):
     def upgrade_environment(self, db):
         cursor = db.cursor()
         t = to_utimestamp(datetime.now(utc))
-        cursor.execute("INSERT INTO system (name, value) VALUES ('fulltextsearch_last_fullindex',%s)" % t)
+        cursor.execute("INSERT INTO system (name, value) VALUES (%s,%s)",
+                       ('fulltextsearch_last_fullindex', t))
         self.reindex()
 
     # ITicketChangeListener methods
