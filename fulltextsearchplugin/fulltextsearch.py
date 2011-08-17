@@ -65,17 +65,17 @@ class Backend(Queue):
         self.solr_endpoint = solr_endpoint
 
     def create(self, item):
-        item.action = item.CREATE
+        item.action = 'CREATE'
         self.put(item)
         self.commit()
         
     def modify(self, item):
-        item.action = item.MODIFY
+        item.action = 'MODIFY'
         self.put(item)
         self.commit()
     
     def delete(self, item):
-        item.action = item.DELETE
+        item.action = 'DELETE'
         self.put(item)
         self.commit()
 
@@ -210,21 +210,26 @@ class FullTextSearch(Component):
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
         ticketsystem = TicketSystem(self.env)
-        so = FullTextSearchObject(self._unique_id(ticket.resource))
-        so.title = "%(title)s: %(message)s"%{
-                        'title':get_resource_shortname(self.env, ticket.resource),
-                        'message':ticketsystem.get_resource_description(ticket.resource, format='summary')}
-        so.author = ticket.values.get('reporter',None)
-        so.changed = ticket.values.get('changetime', None)
-        so.created = ticket.values.get('time', None)
-        so.realm = ticket.resource.realm
-        so.tags = ticket.values.get('keywords', None)
-        so.involved = 'cc' in ticket.values and re.split(r'[;,\s]+', ticket.values['cc'])
-        if not so.involved:
-            so.involved = so.author
-        so.popularity = 0 #FIXME
-        so.oneline = shorten_result(ticket.values.get('description', ''))
-        so.body = repr(ticket.values) + ' '.join([t[4] for t in ticket.get_changelog()])
+        resource_name = get_resource_shortname(self.env, ticket.resource)
+        resource_desc = ticketsystem.get_resource_description(ticket.resource,
+                                                              format='summary')
+        so = FullTextSearchObject(
+                self._unique_id(ticket.resource),
+                title = "%(title)s: %(message)s" % {'title': resource_name,
+                                                    'message': resource_desc},
+                author = ticket.values.get('reporter'),
+                changed = ticket.values.get('changetime'),
+                created = ticket.values.get('time'),
+                realm = ticket.resource.realm,
+                tags = ticket.values.get('keywords'),
+                involved = re.split(r'[;,\s]+', ticket.value.get('cc', ''))
+                           or ticket.values.get('reporter'),
+                popularity = 0, #FIXME
+                oneline = shorten_result(ticket.values.get('description', '')),
+                body = '%r%s' % (ticket.values,
+                                 ' '.join(t[4] for t in ticket.get_changelog()),
+                                 ),
+                )
         self.backend.create(so)
         self.log.debug("Ticket added for indexing: %s"%(ticket))
         
@@ -238,17 +243,19 @@ class FullTextSearch(Component):
 
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
-        so = FullTextSearchObject(self._unique_id(page.resource))
-        so.title = '%s: %s' % (page.name, shorten_line(page.text))
-        so.author = page.author
-        so.changed = page.time
-        so.created = page.time #FIXME get time for version 1
-        so.realm = page.resource.realm
-        so.tags = None #FIXME 
-        so.involved = () #FIXME get author and comment authors
-        so.popularity = 0 #FIXME
-        so.oneline = shorten_result(page.text)
-        so.body = page.text #FIXME add comments as well
+        so = FullTextSearchObject(
+                self._unique_id(page.resource),
+                title = '%s: %s' % (page.name, shorten_line(page.text)),
+                author = page.author,
+                changed = page.time,
+                created = page.time, #FIXME get time for version 1
+                realm = page.resource.realm,
+                tags = None, #FIXME
+                involved = (), #FIXME get author and comment authors
+                popularity = 0, #FIXME
+                oneline = shorten_result(page.text),
+                body = page.text, #FIXME add comments as well
+                )
         self.backend.create(so)
         self.log.debug("WikiPage created for indexing: %s"%(page.name))
 
@@ -275,14 +282,16 @@ class FullTextSearch(Component):
         realm = u"%s:%s:%s" % (attachment.resource.realm, 
                                attachment.parent_realm, 
                                attachment.parent_id)
-        so = FullTextSearchObject(self._unique_id(realm=realm, id=attachment.resource.id))
-        so.realm = attachment.resource.realm
-        so.title = attachment.title
-        so.author = attachment.author
-        so.changed = attachment.date
-        so.created = attachment.date
-        so.body = attachment.open()
-        so.involved = attachment.author
+        so = FullTextSearchObject(
+                self._unique_id(realm=realm, id=attachment.resource.id),
+                realm = attachment.resource.realm,
+                title = attachment.title,
+                author = attachment.author,
+                changed = attachment.date,
+                created = attachment.date,
+                body = attachment.open(),
+                involved = attachment.author,
+                )
         self.backend.create(so)
 
     def attachment_deleted(self, attachment):
@@ -296,14 +305,18 @@ class FullTextSearch(Component):
 
     #IMilestoneChangeListener methods
     def milestone_created(self, milestone):
-        so = FullTextSearchObject(self._unique_id(milestone.resource))
-        so.title = '%s: %s' % (milestone.name, shorten_line(milestone.description))
-        so.changed = (milestone.completed or milestone.due or datetime.now(datefmt.utc))
-        so.realm = milestone.resource.realm
-        so.involved = () #FIXME 
-        so.popularity = 0 #FIXME
-        so.oneline = shorten_result(milestone.description)
-        so.body = milestone.description #FIXME add comments as well
+        so = FullTextSearchObject(
+                self._unique_id(milestone.resource),
+                title = '%s: %s' % (milestone.name,
+                                    shorten_line(milestone.description)),
+                changed = milestone.completed or milestone.due
+                                              or datetime.now(datefmt.utc),
+                realm = milestone.resource.realm,
+                involved = (), #FIXME
+                popularity = 0, #FIXME
+                oneline = shorten_result(milestone.description),
+                body = milestone.description, #FIXME add comments as well
+                )
         self.backend.create(so)
         self.log.debug("Milestone created for indexing: %s"%(milestone))
 
@@ -321,12 +334,14 @@ class FullTextSearch(Component):
         self.backend.delete(so)
 
     def _fill_so(self, node):
-        so = FullTextSearchObject(self._unique_id(realm='versioncontrol', id=node.path))
-        so.title   = node.path
-        so.realm   = 'versioncontrol'
-        so.body    = node.get_content()
-        so.changed = node.get_last_modified()
-        so.action  = so.CREATE
+        so = FullTextSearchObject(
+                self._unique_id(realm='versioncontrol', id=node.path),
+                title = node.path,
+                realm = 'versioncontrol',
+                body = node.get_content(),
+                changed = node.get_last_modified(),
+                action = 'CREATE',
+                )
         return so
 
     #IRepositoryChangeListener methods
@@ -339,14 +354,14 @@ class FullTextSearch(Component):
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif action == Changeset.MOVE:
-                so = FullTextSearchObject(realm='versioncontrol', id=base_path)
-                so.action = so.DELETE
+                so = FullTextSearchObject(realm='versioncontrol', id=base_path,
+                                          action='DELETE')
                 sos.append(so)
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(sos)
             elif action == Changeset.DELETE:
-                so = FullTextSearchObject(realm='versioncontrol', id=path)
-                so.action = so.DELETE
+                so = FullTextSearchObject(realm='versioncontrol', id=path,
+                                          action='DELETE')
                 sos.append(sos)
         for so in sos:
             self.log.debug("Indexing: %s"%so.title)
