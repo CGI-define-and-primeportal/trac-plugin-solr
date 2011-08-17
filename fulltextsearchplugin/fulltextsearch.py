@@ -197,8 +197,7 @@ class FullTextSearch(Component):
             self.milestone_created(milestone)
             
     def reindex(self):
-        project_id = os.path.split(self.env.path)[1]
-        self.backend.empty_proj(project_id)
+        self.backend.empty_proj(self.project)
         num_milestone = self._reindex_milestone()
         num_tickets = self._reindex_ticket()
         num_attachement = self._reindex_attachment()
@@ -429,8 +428,7 @@ class FullTextSearch(Component):
             si = sunburnt.SolrInterface(self.solr_endpoint)
         except:
             return #until solr is packaged
-        project_id = os.path.split(self.env.path)[1]        
-        filter_q = self._build_filter_query(si, filters) & si.query().Q(project=project_id)
+        filter_q = self._build_filter_query(si, filters) & si.query().Q(project=self.project)
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
             result = si.query(terms).filter(filter_q).facet_by('realm').execute()
