@@ -153,7 +153,7 @@ class FullTextSearch(Component):
             self.wiki_page_added(page)
 
     def _reindex_attachment(self):
-        db = self.env.get_db_cnx()
+        db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT type,id,filename,description,size,time,author,ipnr "
                        "FROM attachment")
@@ -168,7 +168,7 @@ class FullTextSearch(Component):
             self.attachment_added(attachment)
 
     def _reindex_ticket(self):
-        db = self.env.get_db_cnx()
+        db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT id FROM ticket")
         for (id,) in cursor:
