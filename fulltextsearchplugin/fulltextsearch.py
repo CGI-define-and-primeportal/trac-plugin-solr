@@ -159,16 +159,30 @@ class FullTextSearch(Component):
     def _reindex_attachment(self):
         db = self.env.get_read_db()
         cursor = db.cursor()
-        cursor.execute("SELECT type,id,filename,description,size,time,author,ipnr "
-                       "FROM attachment")
-        for parent_realm, parent_id, filename, description, size, time, author, ipnr in cursor:
+        canary = Attachment(self.env, 'ticket', 42)
+        if hasattr(canary, 'version'):
+            # Adapted from Attachment.select()
+            cursor.execute("""
+                SELECT type, id, filename, version, description, size, time,
+                       author, ipnr, status, deleted
+                FROM attachment
+                JOIN (SELECT type AS c_type, id AS c_id,
+                             filename AS c_filename, MAX(version) AS c_version
+                      FROM attachment
+                      WHERE deleted IS NULL
+                      GROUP BY c_type, c_id, c_filename) AS current
+                     ON type = c_type AND id = c_id
+                        AND filename = c_filename AND version = c_version
+                ORDER BY time""")
+        else:
+             cursor.execute(
+                "SELECT type,id,filename,description,size,time,author,ipnr "
+                "FROM attachment"
+                )
+        for row in cursor:
+            parent_realm, parent_id = row[0], row[1]
             attachment = Attachment(self.env, parent_realm, parent_id)
-            attachment.filename = filename
-            attachment.description = description
-            attachment.size = size and int(size) or 0
-            attachment.date = datefmt.from_utimestamp(time or 0)
-            attachment.author = author
-            attachment.ipnr = ipnr
+            attachment._from_database(*row[2:])
             self.attachment_added(attachment)
 
     def _reindex_ticket(self):
