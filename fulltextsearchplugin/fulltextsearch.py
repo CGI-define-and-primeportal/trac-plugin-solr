@@ -37,24 +37,35 @@ class FullTextSearchModule(SearchModule):
     search_sources = ExtensionPoint(IFullTextSearchSource)
 
 class FullTextSearchObject(object):
-    def __init__(self, id, title=None, author=None, changed=None, created=None,
-                 oneline=None, realm=None, tags=None, involved=None,
+    def __init__(self, project, resource=None, realm=None, id=None,
+                 parent_realm=None, parent_id=None,
+                 title=None, author=None, changed=None, created=None,
+                 oneline=None, tags=None, involved=None,
                  popularity=None, body=None, action=None):
-        self.id = id
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
-        self.project = id.split(".",1)[0]
+        if resource and realm is None:
+            realm = resource.realm
+            id = resource.id
+        self.project = project
+        self.realm = realm
+        if parent_realm and parent_id:
+            self.id = u"%s.%s:%s:%s.%s" % (project, realm, parent_realm,
+                                           parent_id, id)
+        else:
+            self.id = u"%s.%s.%s" % (project, realm, id)
+
         self.title = title
         self.author = author
         self.changed = changed
         self.created = created
         self.oneline = oneline
-        self.realm = realm
         self.tags = tags
         self.involved = involved
         self.popularity = popularity
         self.body = body
         self.action = action
+
 
 class Backend(Queue):
     """
@@ -124,15 +135,8 @@ class FullTextSearch(Component):
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
         self.backend = Backend(self.solr_endpoint)
+        self.project = os.path.split(self.env.path)[1]
 
-    def _unique_id(self, resource = None, realm = None, id = None):
-        project_id = os.path.split(self.env.path)[1]
-        if resource:
-            id = resource.id
-            realm = resource.realm
-        unique_id = u"%s.%s.%s"%(project_id, realm, id)
-        return unique_id
-    
     def _reindex_svn(self):
         class MockChangeset(list):
             def get_changes(self):
@@ -214,7 +218,7 @@ class FullTextSearch(Component):
         resource_desc = ticketsystem.get_resource_description(ticket.resource,
                                                               format='summary')
         so = FullTextSearchObject(
-                self._unique_id(ticket.resource),
+                self.project, ticket.resource,
                 title = "%(title)s: %(message)s" % {'title': resource_name,
                                                     'message': resource_desc},
                 author = ticket.values.get('reporter'),
@@ -237,14 +241,14 @@ class FullTextSearch(Component):
         self.ticket_created(ticket)
 
     def ticket_deleted(self, ticket):
-        so = FullTextSearchObject(self._unique_id(ticket.resource))
+        so = FullTextSearchObject(self.project, ticket.resource)
         self.backend.delete(so)
         self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
         so = FullTextSearchObject(
-                self._unique_id(page.resource),
+                self.project, page.resource,
                 title = '%s: %s' % (page.name, shorten_line(page.text)),
                 author = page.author,
                 changed = page.time,
@@ -263,7 +267,7 @@ class FullTextSearch(Component):
         self.wiki_page_added(page)
 
     def wiki_page_deleted(self, page):
-        so = FullTextSearchObject(self._unique_id(page.resource))
+        so = FullTextSearchObject(self.project, page.resource)
         self.backend.delete(so)
 
     def wiki_page_version_deleted(self, page):
@@ -271,7 +275,7 @@ class FullTextSearch(Component):
         pass
 
     def wiki_page_renamed(self, page, old_name): 
-        so = FullTextSearchObject(self._unique_id(page.resource))
+        so = FullTextSearchObject(self.project, page.resource)
         so.id = so.id.replace(page.name, old_name) #FIXME, can mess up
         self.backend.delete(so)
         self.wiki_page.added(page)
@@ -279,12 +283,12 @@ class FullTextSearch(Component):
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
         """Called when an attachment is added."""
-        realm = u"%s:%s:%s" % (attachment.resource.realm, 
-                               attachment.parent_realm, 
-                               attachment.parent_id)
         so = FullTextSearchObject(
-                self._unique_id(realm=realm, id=attachment.resource.id),
+                self.project, attachment.resource,
                 realm = attachment.resource.realm,
+                parent_realm = attachment.parent_realm,
+                parent_id = attachment.parent_id,
+                id = attachment.resource.id,
                 title = attachment.title,
                 author = attachment.author,
                 changed = attachment.date,
@@ -296,7 +300,7 @@ class FullTextSearch(Component):
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
-        so = FullTextSearchObject(self._unique_id(attachment.resource))
+        so = FullTextSearchObject(self.project, attachment.resource)
         self.backend.delete(so)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
@@ -306,12 +310,11 @@ class FullTextSearch(Component):
     #IMilestoneChangeListener methods
     def milestone_created(self, milestone):
         so = FullTextSearchObject(
-                self._unique_id(milestone.resource),
+                self.project, milestone.resource,
                 title = '%s: %s' % (milestone.name,
                                     shorten_line(milestone.description)),
                 changed = milestone.completed or milestone.due
                                               or datetime.now(datefmt.utc),
-                realm = milestone.resource.realm,
                 involved = (), #FIXME
                 popularity = 0, #FIXME
                 oneline = shorten_result(milestone.description),
@@ -330,14 +333,14 @@ class FullTextSearch(Component):
 
     def milestone_deleted(self, milestone):
         """Called when a milestone is deleted."""
-        so = FullTextSearchObject(self._unique_id(milestone.resource))
+        so = FullTextSearchObject(self.project, milestone.resource)
         self.backend.delete(so)
 
     def _fill_so(self, node):
         so = FullTextSearchObject(
-                self._unique_id(realm='versioncontrol', id=node.path),
+                self.project,
+                realm='versioncontrol', id=node.path,
                 title = node.path,
-                realm = 'versioncontrol',
                 body = node.get_content(),
                 changed = node.get_last_modified(),
                 action = 'CREATE',
@@ -354,14 +357,16 @@ class FullTextSearch(Component):
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif action == Changeset.MOVE:
-                so = FullTextSearchObject(realm='versioncontrol', id=base_path,
-                                          action='DELETE')
+                so = FullTextSearchObject(
+                        self.project, realm='versioncontrol', id=base_path,
+                        action='DELETE')
                 sos.append(so)
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(sos)
             elif action == Changeset.DELETE:
-                so = FullTextSearchObject(realm='versioncontrol', id=path,
-                                          action='DELETE')
+                so = FullTextSearchObject(
+                        self.project, realm='versioncontrol', id=path,
+                        action='DELETE')
                 sos.append(sos)
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
