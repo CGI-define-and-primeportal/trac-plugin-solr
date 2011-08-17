@@ -231,7 +231,7 @@ class FullTextSearch(Component):
                                  ),
                 )
         self.backend.create(so)
-        self.log.debug("Ticket added for indexing: %s"%(ticket))
+        self.log.debug("Ticket added for indexing: %s", ticket)
         
     def ticket_changed(self, ticket, comment, author, old_values):
         self.ticket_created(ticket)
@@ -239,7 +239,7 @@ class FullTextSearch(Component):
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self._unique_id(ticket.resource))
         self.backend.delete(so)
-        self.log.debug("Ticket deleted; deleting from index: %s"%(ticket))
+        self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
@@ -257,7 +257,7 @@ class FullTextSearch(Component):
                 body = page.text, #FIXME add comments as well
                 )
         self.backend.create(so)
-        self.log.debug("WikiPage created for indexing: %s"%(page.name))
+        self.log.debug("WikiPage created for indexing: %s", page.name)
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
         self.wiki_page_added(page)
@@ -318,7 +318,7 @@ class FullTextSearch(Component):
                 body = milestone.description, #FIXME add comments as well
                 )
         self.backend.create(so)
-        self.log.debug("Milestone created for indexing: %s"%(milestone))
+        self.log.debug("Milestone created for indexing: %s", milestone)
 
     def milestone_changed(self, milestone, old_values):
         """
@@ -364,7 +364,7 @@ class FullTextSearch(Component):
                                           action='DELETE')
                 sos.append(sos)
         for so in sos:
-            self.log.debug("Indexing: %s"%so.title)
+            self.log.debug("Indexing: %s", so.title)
         self.backend.add(sos)
 
     def changeset_modified(self, repos, changeset, old_changeset):
