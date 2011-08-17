@@ -25,7 +25,11 @@ from trac.config import Option
 from trac.util import datefmt
 from trac.search.web_ui import SearchModule
 from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
-    
+
+__all__ = ['IFullTextSearchSource', 'FullTextSearchModule',
+           'FullTextSearchObject', 'Backend', 'FullTextSearch',
+           ]
+
 class IFullTextSearchSource(ISearchSource):
     pass
 
