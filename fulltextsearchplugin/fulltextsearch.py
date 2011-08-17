@@ -37,28 +37,24 @@ class FullTextSearchModule(SearchModule):
     search_sources = ExtensionPoint(IFullTextSearchSource)
 
 class FullTextSearchObject(object):
-
-    title      = None
-    author     = None
-    changed    = None
-    created    = None
-    oneline    = None
-    realm      = None
-    tags       = None
-    involved   = None
-    popularity = None
-    body       = None
-    action     = None
-
-    CREATE     = 'CREATE'
-    MODIFY     = 'MODIFY'
-    DELETE     = 'DELETE'
-
-    def __init__(self, id, **kwargs):
+    def __init__(self, id, title=None, author=None, changed=None, created=None,
+                 oneline=None, realm=None, tags=None, involved=None,
+                 popularity=None, body=None, action=None):
         self.id = id
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
         self.project = id.split(".",1)[0]
+        self.title = title
+        self.author = author
+        self.changed = changed
+        self.created = created
+        self.oneline = oneline
+        self.realm = realm
+        self.tags = tags
+        self.involved = involved
+        self.popularity = popularity
+        self.body = body
+        self.action = action
 
 class Backend(Queue):
     """
@@ -100,13 +96,12 @@ class Backend(Queue):
         s = sunburnt.SolrInterface(self.solr_endpoint)
         while not self.empty():
             item = self.get()
-            if item.action in (FullTextSearchObject.CREATE, 
-                               FullTextSearchObject.MODIFY):
+            if item.action in ('CREATE', 'MODIFY'):
                 if hasattr(item.body, 'read'):
                     s.add(item, extract=True)
                 else:
                     s.add(item) #We can add multiple documents if we want
-            elif item.action == FullTextSearchObject.DELETE:
+            elif item.action == 'DELETE':
                 s.delete(item)
             else:
                 raise Exception("Unknown solr action")
