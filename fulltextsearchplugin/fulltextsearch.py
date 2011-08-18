@@ -30,11 +30,11 @@ __all__ = ['IFullTextSearchSource', 'FullTextSearchModule',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
            ]
 
-class IFullTextSearchSource(ISearchSource):
+class IFullTextSearchSource(Interface):
     pass
 
-class FullTextSearchModule(SearchModule):
-    search_sources = ExtensionPoint(IFullTextSearchSource)
+class FullTextSearchModule(Component):
+    pass
 
 class FullTextSearchObject(object):
     def __init__(self, project, resource=None, realm=None, id=None,
@@ -125,7 +125,7 @@ class FullTextSearch(Component):
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener, IFullTextSearchSource, IAdminCommandProvider,
+               IRepositoryChangeListener, ISearchSource, IAdminCommandProvider,
                IEnvironmentSetupParticipant)
 
     solr_endpoint = Option("search", "solr_endpoint",
