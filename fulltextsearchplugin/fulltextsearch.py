@@ -207,7 +207,9 @@ class FullTextSearch(Component):
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
-        pass
+        self.env.with_transaction()
+        def do_upgrade(db):
+            self.upgrade_environment(db)
 
     def environment_needs_upgrade(self, db):
        cursor = db.cursor()
@@ -219,10 +221,11 @@ class FullTextSearch(Component):
 
     def upgrade_environment(self, db):
         cursor = db.cursor()
+        self.reindex()
         t = to_utimestamp(datetime.now(utc))
         cursor.execute("INSERT INTO system (name, value) VALUES (%s,%s)",
                        ('fulltextsearch_last_fullindex', t))
-        self.reindex()
+        db.commit()
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
