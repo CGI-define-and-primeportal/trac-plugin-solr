@@ -242,7 +242,7 @@ class FullTextSearch(Component):
                 created = ticket.values.get('time'),
                 realm = ticket.resource.realm,
                 tags = ticket.values.get('keywords'),
-                involved = re.split(r'[;,\s]+', ticket.value.get('cc', ''))
+                involved = re.split(r'[;,\s]+', ticket.values.get('cc', ''))
                            or ticket.values.get('reporter'),
                 popularity = 0, #FIXME
                 oneline = shorten_result(ticket.values.get('description', '')),
