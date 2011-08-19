@@ -397,23 +397,23 @@ class FullTextSearch(Component):
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
         sos = []
-        for (path, kind, action, base_path, base_rev) in changeset.get_changes():
+        for path, kind, change, base_path, base_rev in changeset.get_changes():
             #FIXME handle kind == Node.DIRECTORY
-            if action in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
+            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
-            elif action == Changeset.MOVE:
+            elif change == Changeset.MOVE:
                 so = FullTextSearchObject(
                         self.project, realm='versioncontrol', id=base_path,
                         action='DELETE')
                 sos.append(so)
                 so = self._fill_so(repos.get_node(path, changeset.rev))
-                sos.append(sos)
-            elif action == Changeset.DELETE:
+                sos.append(so)
+            elif change == Changeset.DELETE:
                 so = FullTextSearchObject(
                         self.project, realm='versioncontrol', id=path,
                         action='DELETE')
-                sos.append(sos)
+                sos.append(so)
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
         self.backend.add(sos)
