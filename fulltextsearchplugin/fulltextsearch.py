@@ -263,18 +263,19 @@ class FullTextSearch(Component):
 
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
+        history = list(page.get_history())
         so = FullTextSearchObject(
                 self.project, page.resource,
                 title = '%s: %s' % (page.name, shorten_line(page.text)),
                 author = page.author,
                 changed = page.time,
-                created = page.time, #FIXME get time for version 1
+                created = history[-1][1], # .time of oldest version
                 realm = page.resource.realm,
-                tags = None, #FIXME
-                involved = (), #FIXME get author and comment authors
+                tags = self._page_tags(page.resource.realm, page.name),
+                involved = list(set(r[2] for r in history)),
                 popularity = 0, #FIXME
                 oneline = shorten_result(page.text),
-                body = page.text, #FIXME add comments as well
+                body = '\n'.join([page.text] + [str(r[3]) for r in history]),
                 )
         self.backend.create(so)
         self.log.debug("WikiPage created for indexing: %s", page.name)
@@ -295,6 +296,25 @@ class FullTextSearch(Component):
         so.id = so.id.replace(page.name, old_name) #FIXME, can mess up
         self.backend.delete(so)
         self.wiki_page.added(page)
+
+    def _page_tags(self, realm, page):
+        db = self.env.get_read_db()
+        cursor = db.cursor()
+        try:
+            cursor.execute('SELECT tag FROM tags '
+                           'WHERE tagspace=%s AND name=%s '
+                           'ORDER BY tag',
+                           (realm, page))
+        except Exception, e:
+            # No common ProgrammingError between database APIs
+            # For resons unknown sqlite3 raises OperationalError when a table
+            # doesn't exist
+            if e.__class__.__name__ in ('ProgrammingError',
+                                        'OperationalError'):
+                return []
+            else:
+                raise e
+        return (tag for (tag,) in cursor)
 
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
