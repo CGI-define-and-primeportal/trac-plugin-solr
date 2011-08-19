@@ -483,11 +483,12 @@ class FullTextSearch(Component):
             elif 'attachment:' in realm:    #FIXME hacky stuff here
                 href = req.href(realm.replace(':','/'), rid)
                 # FIXME is there a better way to do this?
-                # FIXME i18n
                 if realm.split(":")[1] == "wiki":
-                    title = "%s (attached to page %s)" % (rid, realm.split(":")[2])
+                    title = _("%(filename)s (attached to page %(wiki_page)s)",
+                              filename=rid, wiki_page=realm.split(":")[2])
                 if realm.split(":")[1] == "ticket":
-                    title = "%s (attached to ticket #%s)" % (rid, realm.split(":")[2])
+                    title = _("%(filename)s (attached to ticket #%(ticket)s)",
+                              filename=rid, ticket=realm.split(":")[2])
             else:
                 href = req.href(realm, rid)
             author  = doc.get('author','')
