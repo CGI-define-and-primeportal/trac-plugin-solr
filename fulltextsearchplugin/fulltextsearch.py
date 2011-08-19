@@ -319,6 +319,16 @@ class FullTextSearch(Component):
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
         """Called when an attachment is added."""
+        if hasattr(attachment, 'version'):
+            history = list(attachment.get_history())
+            created = history[-1].date
+            involved = list(set(a.author for a in history))
+            comments = list(set(a.description for a in history 
+                                if a.description))
+        else:
+            created = attachment.date
+            involved = attachment.author
+            comments = [attachment.description]
         so = FullTextSearchObject(
                 self.project, attachment.resource,
                 realm = attachment.resource.realm,
@@ -328,9 +338,9 @@ class FullTextSearch(Component):
                 title = attachment.title,
                 author = attachment.author,
                 changed = attachment.date,
-                created = attachment.date,
-                body = attachment.open(),
-                involved = attachment.author,
+                created = created,
+                body = attachment.open() + '\n'.join(comments),
+                involved = involved,
                 )
         self.backend.create(so)
 
