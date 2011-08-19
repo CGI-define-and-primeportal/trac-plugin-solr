@@ -361,10 +361,10 @@ class FullTextSearch(Component):
                                     shorten_line(milestone.description)),
                 changed = milestone.completed or milestone.due
                                               or datetime.now(datefmt.utc),
-                involved = (), #FIXME
+                involved = (),
                 popularity = 0, #FIXME
                 oneline = shorten_result(milestone.description),
-                body = milestone.description, #FIXME add comments as well
+                body = milestone.description,
                 )
         self.backend.create(so)
         self.log.debug("Milestone created for indexing: %s", milestone)
