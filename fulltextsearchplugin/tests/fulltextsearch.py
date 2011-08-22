@@ -1,3 +1,6 @@
+import os
+import shutil
+import tempfile
 import unittest
 
 from trac.resource import Resource
@@ -81,6 +84,24 @@ class FullTextSearchObjectTestCase(unittest.TestCase):
         self.assertEquals('project1.bar:wiki:WikiStart.baz', so.id)
         self.assertEquals('bar', so.realm)
 
+class FullTextSearchTestCase(unittest.TestCase):
+    def setUp(self):
+        self.env = EnvironmentStub(enable=['trac.*', FullTextSearch])
+        self.env.path = os.path.join(tempfile.gettempdir(), 'trac-tempenv')
+        os.mkdir(self.env.path)
+
+        self.env.config.set('search', 'solr_endpoint', '')
+        self.fts = FullTextSearch(self.env)
+
+    def tearDown(self):
+        shutil.rmtree(self.env.path)
+        self.env.reset_db()
+
+    def test_properties(self):
+        self.assertEquals('trac-tempenv', self.fts.project)
+
+    def _get_so(self):
+        return self.fts.backend.get(block=False)
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))
