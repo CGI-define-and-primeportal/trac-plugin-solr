@@ -8,6 +8,7 @@ import unittest
 from trac.attachment import Attachment
 from trac.resource import Resource
 from trac.test import EnvironmentStub, Mock
+from trac.ticket import Ticket, Milestone
 from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
 from trac.wiki import WikiPage
 
@@ -133,6 +134,40 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertTrue('Lorem ipsum' in so.body)
         self.assertTrue('Summary line' in so.body)
 
+    def test_ticket(self):
+        self.env.config.set('ticket-custom', 'foo', 'text')
+        ticket = Ticket(self.env)
+        ticket.populate({'reporter': 'santa', 'summary': 'Summary line',
+                         'description': 'Lorem ipsum dolor sit amet',
+                         'foo': 'This is a custom field',
+                         'keywords': 'alpha bravo charlie',
+                         'cc': 'a@b.com, c@example.com',
+                         })
+        ticket.insert()
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.ticket.1', so.id)
+        self.assertTrue('#1' in so.title)
+        self.assertTrue('Summary line' in so.title)
+        self.assertEquals('santa', so.author)
+        self.assertEquals(ticket['time'], so.created)
+        self.assertEquals(ticket['changetime'], so.changed)
+        self.assertTrue('a@b.com' in so.involved)
+        self.assertTrue('c@example.com' in so.involved)
+        self.assertTrue('bravo' in so.tags)
+        self.assertTrue('Lorem ipsum' in so.oneline)
+        self.assertTrue('Lorem ipsum' in so.body)
+
+        original_time = ticket['time']
+        ticket['description'] = 'No latin filler here'
+        ticket.save_changes('Jack Sprat', 'Could eat no fat')
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.ticket.1', so.id)
+        self.assertEquals(original_time, so.created)
+        self.assertEquals(ticket['changetime'], so.changed)
+        self.assertFalse('Lorem ipsum' in so.body)
+        self.assertTrue('No latin filler here' in so.body)
+        self.assertTrue('Could eat no fat' in so.body)
+
     def test_wiki_page(self):
         page = WikiPage(self.env, 'NewPage')
         page.text = 'Lorem ipsum dolor sit amet'
@@ -159,6 +194,28 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
         self.assertTrue('Could eat no fat' in so.body)
+
+    def test_milestone(self):
+        milestone = Milestone(self.env)
+        milestone.name = 'New target date'
+        milestone.description = 'Lorem ipsum dolor sit amet'
+        milestone.insert()
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.milestone.New target date', so.id)
+        self.assertTrue('New target date' in so.title)
+        self.assertTrue('Lorem ipsum' in so.title)
+        self.assertTrue('Lorem ipsum' in so.oneline)
+        self.assertTrue('Lorem ipsum' in so.body)
+
+        milestone.description = 'No latin filler here'
+        milestone.due = datetime(2001, 01, 01, tzinfo=utc)
+        milestone.update()
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.milestone.New target date', so.id)
+        self.assertEquals(milestone.due, so.changed)
+        self.assertFalse('Lorem ipsum' in so.body)
+        self.assertTrue('No latin filler here' in so.body)
+
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))
