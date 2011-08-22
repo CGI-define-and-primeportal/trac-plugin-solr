@@ -9,6 +9,7 @@ from trac.attachment import Attachment
 from trac.resource import Resource
 from trac.test import EnvironmentStub, Mock
 from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
+from trac.wiki import WikiPage
 
 from fulltextsearchplugin.fulltextsearch import (FullTextSearchObject, Backend,
                                                  FullTextSearch,
@@ -132,6 +133,32 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertTrue('Lorem ipsum' in so.body)
         self.assertTrue('Summary line' in so.body)
 
+    def test_wiki_page(self):
+        page = WikiPage(self.env, 'NewPage')
+        page.text = 'Lorem ipsum dolor sit amet'
+        # TODO Tags
+        page.save('santa', 'Commment', 'northpole.example.com')
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.wiki.NewPage', so.id)
+        self.assertTrue('NewPage' in so.title)
+        self.assertTrue('Lorem ipsum' in so.title)
+        self.assertEquals('santa', so.author)
+        self.assertEquals(page.time, so.created)
+        self.assertEquals(page.time, so.changed)
+        self.assertTrue('santa' in so.involved)
+        self.assertTrue('Lorem ipsum' in so.oneline)
+        self.assertTrue('Lorem ipsum' in so.body)
+
+        original_time = page.time
+        page.text = 'No latin filler here'
+        page.save('Jack Sprat', 'Could eat no fat', 'dinnertable.local')
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.wiki.NewPage', so.id)
+        self.assertEquals(original_time, so.created)
+        self.assertEquals(page.time, so.changed)
+        self.assertFalse('Lorem ipsum' in so.body)
+        self.assertTrue('No latin filler here' in so.body)
+        self.assertTrue('Could eat no fat' in so.body)
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))

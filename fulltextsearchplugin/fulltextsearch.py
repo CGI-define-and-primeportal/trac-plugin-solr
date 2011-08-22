@@ -269,7 +269,6 @@ class FullTextSearch(Component):
                 author = page.author,
                 changed = page.time,
                 created = history[-1][1], # .time of oldest version
-                realm = page.resource.realm,
                 tags = self._page_tags(page.resource.realm, page.name),
                 involved = list(set(r[2] for r in history)),
                 popularity = 0, #FIXME
