@@ -47,5 +47,6 @@ setup(
         'trac.plugins': [
             'fulltextsearchplugin.fulltextsearch = fulltextsearchplugin.fulltextsearch',
         ]    
-    }
+    },
+    test_suite = 'fulltextsearchplugin.tests.suite',
 )
