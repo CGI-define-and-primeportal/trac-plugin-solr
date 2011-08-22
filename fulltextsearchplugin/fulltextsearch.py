@@ -240,7 +240,6 @@ class FullTextSearch(Component):
                 author = ticket.values.get('reporter'),
                 changed = ticket.values.get('changetime'),
                 created = ticket.values.get('time'),
-                realm = ticket.resource.realm,
                 tags = ticket.values.get('keywords'),
                 involved = re.split(r'[;,\s]+', ticket.values.get('cc', ''))
                            or ticket.values.get('reporter'),

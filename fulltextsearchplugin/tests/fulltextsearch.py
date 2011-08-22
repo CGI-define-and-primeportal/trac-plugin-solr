@@ -1,14 +1,25 @@
+from datetime import datetime, timedelta
+from StringIO import StringIO
 import os
 import shutil
 import tempfile
 import unittest
 
+from trac.attachment import Attachment
 from trac.resource import Resource
 from trac.test import EnvironmentStub, Mock
+from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
 
 from fulltextsearchplugin.fulltextsearch import (FullTextSearchObject, Backend,
                                                  FullTextSearch,
                                                  )
+
+class MockBackend(Backend):
+    def empty_proj(self):
+        pass
+
+    def commit(self):
+        pass
 
 class FullTextSearchObjectTestCase(unittest.TestCase):
     def setUp(self):
@@ -92,6 +103,7 @@ class FullTextSearchTestCase(unittest.TestCase):
 
         self.env.config.set('search', 'solr_endpoint', '')
         self.fts = FullTextSearch(self.env)
+        self.fts.backend = MockBackend(self.fts.solr_endpoint)
 
     def tearDown(self):
         shutil.rmtree(self.env.path)
@@ -102,9 +114,28 @@ class FullTextSearchTestCase(unittest.TestCase):
 
     def _get_so(self):
         return self.fts.backend.get(block=False)
+
+    def test_attachment(self):
+        attachment = Attachment(self.env, 'ticket', 42)
+        attachment.description = 'Summary line'
+        attachment.author = 'Santa'
+        attachment.ipnr = 'northpole.example.com'
+        attachment.insert('foo.txt', StringIO('Lorem ipsum dolor sit amet'), 0)
+        so = self._get_so()
+        self.assertEquals('trac-tempenv.attachment:ticket:42.foo.txt', so.id)
+        self.assertTrue('foo.txt' in so.title)
+        self.assertEquals('Santa', so.author)
+        self.assertEquals(attachment.date, so.created)
+        self.assertEquals(attachment.date, so.changed)
+        self.assertTrue('Santa' in so.involved)
+        #self.assertTrue('Lorem ipsum' in so.oneline) # TODO
+        self.assertTrue('Lorem ipsum' in so.body)
+        self.assertTrue('Summary line' in so.body)
+
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))
+    suite.addTest(unittest.makeSuite(FullTextSearchTestCase, 'test'))
     return suite
 
 if __name__ == '__main__':
