@@ -71,8 +71,9 @@ class Backend(Queue):
     """
     """
 
-    def __init__(self, solr_endpoint):
+    def __init__(self, solr_endpoint, log):
         Queue.__init__(self)
+        self.log = log
         self.solr_endpoint = solr_endpoint
 
     def create(self, item):
@@ -100,7 +101,8 @@ class Backend(Queue):
         
     def empty_proj(self, project_id):
         s = sunburnt.SolrInterface(self.solr_endpoint)
-        s.delete(queries = "id:%s.*"%project_id) #I would have like some more info back
+        # I would have like some more info back
+        s.delete(queries = u"id:%s.*" % project_id)
         s.commit()
 
     def commit(self):
@@ -116,7 +118,12 @@ class Backend(Queue):
                 s.delete(item)
             else:
                 raise Exception("Unknown solr action")
-            s.commit()
+            try:
+                s.commit()
+            except Exception:
+                self.log.error('%s %r', item, item)
+                raise
+                
         
 
 
@@ -134,7 +141,7 @@ class FullTextSearch(Component):
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
-        self.backend = Backend(self.solr_endpoint)
+        self.backend = Backend(self.solr_endpoint, self.log)
         self.project = os.path.split(self.env.path)[1]
 
     def _reindex_svn(self):
@@ -159,6 +166,13 @@ class FullTextSearch(Component):
     def _reindex_attachment(self):
         db = self.env.get_read_db()
         cursor = db.cursor()
+        # This plugin was originally written for #define 4, a Trac derivative
+        # that includes versioned attachments. TO try and keep compatibility
+        # with both check support by checking for a version attribute on an
+        # Attachment. Instantiating Attachment doesn't perform any queries,
+        # so it doesn't matter if ticket:42 actually exists
+        # The versioned attachment code used by #define is published on github
+        # https://github.com/moreati/trac-gitsvn/tree/0.12-versionedattachments
         canary = Attachment(self.env, 'ticket', 42)
         if hasattr(canary, 'version'):
             # Adapted from Attachment.select()
@@ -235,8 +249,8 @@ class FullTextSearch(Component):
                                                               format='summary')
         so = FullTextSearchObject(
                 self.project, ticket.resource,
-                title = "%(title)s: %(message)s" % {'title': resource_name,
-                                                    'message': resource_desc},
+                title = u"%(title)s: %(message)s" % {'title': resource_name,
+                                                     'message': resource_desc},
                 author = ticket.values.get('reporter'),
                 changed = ticket.values.get('changetime'),
                 created = ticket.values.get('time'),
@@ -245,9 +259,9 @@ class FullTextSearch(Component):
                            or ticket.values.get('reporter'),
                 popularity = 0, #FIXME
                 oneline = shorten_result(ticket.values.get('description', '')),
-                body = '%r%s' % (ticket.values,
-                                 ' '.join(t[4] for t in ticket.get_changelog()),
-                                 ),
+                body = u'%r%s' % (ticket.values,
+                                  u' '.join(t[4] for t in ticket.get_changelog()),
+                                  ),
                 )
         self.backend.create(so)
         self.log.debug("Ticket added for indexing: %s", ticket)
@@ -265,7 +279,7 @@ class FullTextSearch(Component):
         history = list(page.get_history())
         so = FullTextSearchObject(
                 self.project, page.resource,
-                title = '%s: %s' % (page.name, shorten_line(page.text)),
+                title = u'%s: %s' % (page.name, shorten_line(page.text)),
                 author = page.author,
                 changed = page.time,
                 created = history[-1][1], # .time of oldest version
@@ -273,7 +287,7 @@ class FullTextSearch(Component):
                 involved = list(set(r[2] for r in history)),
                 popularity = 0, #FIXME
                 oneline = shorten_result(page.text),
-                body = '\n'.join([page.text] + [str(r[3]) for r in history]),
+                body = u'\n'.join([page.text] + [unicode(r[3]) for r in history]),
                 )
         self.backend.create(so)
         self.log.debug("WikiPage created for indexing: %s", page.name)
@@ -305,7 +319,7 @@ class FullTextSearch(Component):
                            (realm, page))
         except Exception, e:
             # No common ProgrammingError between database APIs
-            # For resons unknown sqlite3 raises OperationalError when a table
+            # For reasons unknown sqlite3 raises OperationalError when a table
             # doesn't exist
             if e.__class__.__name__ in ('ProgrammingError',
                                         'OperationalError'):
@@ -337,6 +351,8 @@ class FullTextSearch(Component):
                 author = attachment.author,
                 changed = attachment.date,
                 created = created,
+                # FIXME I think SOLR expects UTF-8, we give it a BLOB of
+                #       arbitrary bytes
                 body = attachment.open().read() + '\n'.join(comments),
                 involved = involved,
                 )
@@ -355,8 +371,8 @@ class FullTextSearch(Component):
     def milestone_created(self, milestone):
         so = FullTextSearchObject(
                 self.project, milestone.resource,
-                title = '%s: %s' % (milestone.name,
-                                    shorten_line(milestone.description)),
+                title = u'%s: %s' % (milestone.name,
+                                     shorten_line(milestone.description)),
                 changed = milestone.completed or milestone.due
                                               or datetime.now(datefmt.utc),
                 involved = (),
@@ -383,7 +399,7 @@ class FullTextSearch(Component):
     def _fill_so(self, node):
         so = FullTextSearchObject(
                 self.project,
-                realm='versioncontrol', id=node.path,
+                realm = u'versioncontrol', id=node.path,
                 title = node.path,
                 body = node.get_content(),
                 changed = node.get_last_modified(),
@@ -402,14 +418,14 @@ class FullTextSearch(Component):
                 sos.append(so)
             elif change == Changeset.MOVE:
                 so = FullTextSearchObject(
-                        self.project, realm='versioncontrol', id=base_path,
+                        self.project, realm=u'versioncontrol', id=base_path,
                         action='DELETE')
                 sos.append(so)
                 so = self._fill_so(repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif change == Changeset.DELETE:
                 so = FullTextSearchObject(
-                        self.project, realm='versioncontrol', id=path,
+                        self.project, realm=u'versioncontrol', id=path,
                         action='DELETE')
                 sos.append(so)
         for so in sos:
@@ -429,12 +445,12 @@ class FullTextSearch(Component):
     # ISearchSource methods.
 
     def get_search_filters(self, req):
-        yield ('ticket', 'Tickets', True)
-        yield ('wiki', 'Wiki', True)
-        yield ('milestone', 'Milestones', True)
-        yield ('changeset', 'Changesets', True)
-        yield ('versioncontrol', 'File archive', True)
-        yield ('attachment', 'Attachments', True)
+        yield (u'ticket', u'Tickets', True)
+        yield (u'wiki', u'Wiki', True)
+        yield (u'milestone', u'Milestones', True)
+        yield (u'changeset', u'Changesets', True)
+        yield (u'versioncontrol', u'File archive', True)
+        yield (u'attachment', u'Attachments', True)
 
     def _build_filter_query(self, si, filters):
         Q = si.query().Q
@@ -482,10 +498,10 @@ class FullTextSearch(Component):
                 href = req.href(realm.replace(':','/'), rid)
                 # FIXME is there a better way to do this?
                 if realm.split(":")[1] == "wiki":
-                    title = _("%(filename)s (attached to page %(wiki_page)s)",
+                    title = _(u"%(filename)s (attached to page %(wiki_page)s)",
                               filename=rid, wiki_page=realm.split(":")[2])
                 if realm.split(":")[1] == "ticket":
-                    title = _("%(filename)s (attached to ticket #%(ticket)s)",
+                    title = _(u"%(filename)s (attached to ticket #%(ticket)s)",
                               filename=rid, ticket=realm.split(":")[2])
             else:
                 href = req.href(realm, rid)
