@@ -239,7 +239,6 @@ class FullTextSearch(Component):
         t = to_utimestamp(datetime.now(utc))
         cursor.execute("INSERT INTO system (name, value) VALUES (%s,%s)",
                        ('fulltextsearch_last_fullindex', t))
-        db.commit()
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
