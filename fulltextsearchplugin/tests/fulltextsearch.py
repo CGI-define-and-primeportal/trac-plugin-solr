@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import logging
 
 from trac.attachment import Attachment
 from trac.resource import Resource
@@ -17,6 +18,9 @@ from fulltextsearchplugin.fulltextsearch import (FullTextSearchObject, Backend,
                                                  )
 
 class MockBackend(Backend):
+    def __init__(self, endpoint):
+        log = logging.getLogger('MockBackend')
+        Backend.__init__(self, endpoint, log)
     def empty_proj(self):
         pass
 
@@ -100,10 +104,9 @@ class FullTextSearchObjectTestCase(unittest.TestCase):
 class FullTextSearchTestCase(unittest.TestCase):
     def setUp(self):
         self.env = EnvironmentStub(enable=['trac.*', FullTextSearch])
-        self.env.path = os.path.join(tempfile.gettempdir(), 'trac-tempenv')
-        os.mkdir(self.env.path)
-
-        self.env.config.set('search', 'solr_endpoint', '')
+        self.env.path = tempfile.mkdtemp(prefix='trac-testenv')
+        self.basename = os.path.basename(self.env.path)
+        #self.env.config.set('search', 'solr_endpoint', 'http://localhost:8983/solr/')
         self.fts = FullTextSearch(self.env)
         self.fts.backend = MockBackend(self.fts.solr_endpoint)
 
@@ -112,7 +115,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.env.reset_db()
 
     def test_properties(self):
-        self.assertEquals('trac-tempenv', self.fts.project)
+        self.assertEquals(self.basename, self.fts.project)
 
     def _get_so(self):
         return self.fts.backend.get(block=False)
@@ -124,7 +127,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         attachment.ipnr = 'northpole.example.com'
         attachment.insert('foo.txt', StringIO('Lorem ipsum dolor sit amet'), 0)
         so = self._get_so()
-        self.assertEquals('trac-tempenv.attachment:ticket:42.foo.txt', so.id)
+        self.assertEquals('%s.attachment:ticket:42.foo.txt' % self.basename, so.id)
         self.assertTrue('foo.txt' in so.title)
         self.assertEquals('Santa', so.author)
         self.assertEquals(attachment.date, so.created)
@@ -145,7 +148,7 @@ class FullTextSearchTestCase(unittest.TestCase):
                          })
         ticket.insert()
         so = self._get_so()
-        self.assertEquals('trac-tempenv.ticket.1', so.id)
+        self.assertEquals('%s.ticket.1' % self.basename, so.id)
         self.assertTrue('#1' in so.title)
         self.assertTrue('Summary line' in so.title)
         self.assertEquals('santa', so.author)
@@ -161,7 +164,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         ticket['description'] = 'No latin filler here'
         ticket.save_changes('Jack Sprat', 'Could eat no fat')
         so = self._get_so()
-        self.assertEquals('trac-tempenv.ticket.1', so.id)
+        self.assertEquals('%s.ticket.1' % self.basename, so.id)
         self.assertEquals(original_time, so.created)
         self.assertEquals(ticket['changetime'], so.changed)
         self.assertFalse('Lorem ipsum' in so.body)
@@ -174,7 +177,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         # TODO Tags
         page.save('santa', 'Commment', 'northpole.example.com')
         so = self._get_so()
-        self.assertEquals('trac-tempenv.wiki.NewPage', so.id)
+        self.assertEquals('%s.wiki.NewPage' % self.basename, so.id)
         self.assertTrue('NewPage' in so.title)
         self.assertTrue('Lorem ipsum' in so.title)
         self.assertEquals('santa', so.author)
@@ -188,20 +191,30 @@ class FullTextSearchTestCase(unittest.TestCase):
         page.text = 'No latin filler here'
         page.save('Jack Sprat', 'Could eat no fat', 'dinnertable.local')
         so = self._get_so()
-        self.assertEquals('trac-tempenv.wiki.NewPage', so.id)
+        self.assertEquals('%s.wiki.NewPage' % self.basename, so.id)
         self.assertEquals(original_time, so.created)
         self.assertEquals(page.time, so.changed)
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
         self.assertTrue('Could eat no fat' in so.body)
-
+    
+    def test_wiki_page_unicode_error(self):
+        import pkg_resources
+        import define
+        text = open(pkg_resources.resource_filename(define.__name__, 'default-pages/DefineGuide%2FTicketTutorial')).read()
+        page = WikiPage(self.env, 'TicketTutorial')
+        page.text = text.decode('utf-8')
+        page.save('olle', 'Comment', 'define.logica.com')
+        so = self._get_so()
+        self.assertEquals('%s.wiki.TicketTutorial' % self.basename, so.id)
+        
     def test_milestone(self):
         milestone = Milestone(self.env)
         milestone.name = 'New target date'
         milestone.description = 'Lorem ipsum dolor sit amet'
         milestone.insert()
         so = self._get_so()
-        self.assertEquals('trac-tempenv.milestone.New target date', so.id)
+        self.assertEquals('%s.milestone.New target date' % self.basename, so.id)
         self.assertTrue('New target date' in so.title)
         self.assertTrue('Lorem ipsum' in so.title)
         self.assertTrue('Lorem ipsum' in so.oneline)
@@ -211,7 +224,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         milestone.due = datetime(2001, 01, 01, tzinfo=utc)
         milestone.update()
         so = self._get_so()
-        self.assertEquals('trac-tempenv.milestone.New target date', so.id)
+        self.assertEquals('%s.milestone.New target date' % self.basename, so.id)
         self.assertEquals(milestone.due, so.changed)
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
