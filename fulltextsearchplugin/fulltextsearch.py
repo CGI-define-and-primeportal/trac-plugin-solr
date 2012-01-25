@@ -231,7 +231,9 @@ class FullTextSearch(Component):
                       ('fulltextsearch_last_fullindex',))
        result = cursor.fetchone()
        if result is None:
-           return True
+           # Use Logica extension/tweak to perform reindex last and stand a
+           # better chance of including everything
+           return 'defer'
 
     def upgrade_environment(self, db):
         cursor = db.cursor()
