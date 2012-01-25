@@ -317,12 +317,20 @@ class FullTextSearch(Component):
                            'ORDER BY tag',
                            (realm, page))
         except Exception, e:
-            # No common ProgrammingError between database APIs
-            # For reasons unknown sqlite3 raises OperationalError when a table
-            # doesn't exist
+            # Prior to Trac 0.13 errors from a wrapped cursor are returned as
+            # the native exceptions from the database library 
+            # http://trac.edgewall.org/ticket/6348
+            # sqlite3 raises OperationalError instead of ProgrammingError if
+            # a queried table doesn't exist
+            # http://bugs.python.org/issue7394
+            # Following an error PostgresSQL requires that any transaction be
+            # rolled back before further commands/queries are executes
+            # psycopg2 raises InternalError to signal this
+            # http://initd.org/psycopg/docs/faq.html
             if e.__class__.__name__ in ('ProgrammingError',
                                         'OperationalError'):
-                return []
+                db.rollback()
+                return iter([])
             else:
                 raise e
         return (tag for (tag,) in cursor)
