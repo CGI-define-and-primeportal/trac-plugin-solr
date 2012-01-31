@@ -41,7 +41,7 @@ class FullTextSearchObject(object):
                  parent_realm=None, parent_id=None,
                  title=None, author=None, changed=None, created=None,
                  oneline=None, tags=None, involved=None,
-                 popularity=None, body=None, action=None):
+                 popularity=None, body=None, comments=None, action=None):
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
         if resource and realm is None:
@@ -64,6 +64,7 @@ class FullTextSearchObject(object):
         self.involved = involved
         self.popularity = popularity
         self.body = body
+        self.comments = comments
         self.action = action
 
 
@@ -260,9 +261,8 @@ class FullTextSearch(Component):
                            or ticket.values.get('reporter'),
                 popularity = 0, #FIXME
                 oneline = shorten_result(ticket.values.get('description', '')),
-                body = u'%r%s' % (ticket.values,
-                                  u' '.join(t[4] for t in ticket.get_changelog()),
-                                  ),
+                body = u'%r' % (ticket.values,),
+                comments = [t[4] for t in ticket.get_changelog()],
                 )
         self.backend.create(so)
         self.log.debug("Ticket added for indexing: %s", ticket)
@@ -288,7 +288,8 @@ class FullTextSearch(Component):
                 involved = list(set(r[2] for r in history)),
                 popularity = 0, #FIXME
                 oneline = shorten_result(page.text),
-                body = u'\n'.join([page.text] + [unicode(r[3]) for r in history]),
+                body = page.text,
+                comments = [r[3] for r in history],
                 )
         self.backend.create(so)
         self.log.debug("WikiPage created for indexing: %s", page.name)
@@ -360,9 +361,8 @@ class FullTextSearch(Component):
                 author = attachment.author,
                 changed = attachment.date,
                 created = created,
-                # FIXME I think SOLR expects UTF-8, we give it a BLOB of
-                #       arbitrary bytes
-                body = attachment.open().read() + '\n'.join(comments),
+                body = attachment,
+                comments = comments,
                 involved = involved,
                 )
         self.backend.create(so)
