@@ -527,7 +527,7 @@
      <str name="echoParams">explicit</str>
      <float name="tie">0.01</float>
      <str name="qf">
-	body^0.5 tags^1.2 title^2.0 involved^1.5 id^10.0 author^10.9 changed created oneline^0.7
+	body^0.5 comments^0.4 tags^1.2 title^2.0 involved^1.5 id^10.0 author^10.9 changed created oneline^0.7
      </str>
      <str name="pf">
         body^0.2 tags^1.1 title^1.5

@@ -413,6 +413,7 @@
    <field name="popularity" type="int" indexed="true" stored="true" />
    <field name="body" type="text" indexed="true" stored="false"/>
    <field name="body_rev" type="text_rev" indexed="true" stored="false" multiValued="true"/>
+   <field name="comments" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="timestamp" type="date" indexed="true" stored="true" default="NOW"/>
    <dynamicField name="ignored_*" type="ignored"/>
  </fields>
