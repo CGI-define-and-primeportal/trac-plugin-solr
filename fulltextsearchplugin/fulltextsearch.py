@@ -361,7 +361,7 @@ class FullTextSearch(Component):
                 author = attachment.author,
                 changed = attachment.date,
                 created = created,
-                body = attachment,
+                body = attachment.open(),
                 comments = comments,
                 involved = involved,
                 )
