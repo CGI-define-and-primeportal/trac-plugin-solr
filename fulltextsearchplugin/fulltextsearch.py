@@ -146,7 +146,11 @@ class FullTextSearch(Component):
         self.project = os.path.split(self.env.path)[1]
 
     def _reindex_svn(self):
+        # FIXME This mock class is the closest we get to a `Changeset` object
+        #       during a full reindex. Hence commit messages are not
+        #       searchable following a reindex
         class MockChangeset(list):
+            message = ''
             def get_changes(self):
                 return self
         repo = self.env.get_repository()
@@ -405,11 +409,12 @@ class FullTextSearch(Component):
         so = FullTextSearchObject(self.project, milestone.resource)
         self.backend.delete(so)
 
-    def _fill_so(self, node):
+    def _fill_so(self, changeset, node):
         so = FullTextSearchObject(
                 self.project,
                 realm = u'versioncontrol', id=node.path,
                 title = node.path,
+                oneline = changeset.message,
                 body = node.get_content(),
                 changed = node.get_last_modified(),
                 action = 'CREATE',
@@ -423,14 +428,16 @@ class FullTextSearch(Component):
         for path, kind, change, base_path, base_rev in changeset.get_changes():
             #FIXME handle kind == Node.DIRECTORY
             if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
-                so = self._fill_so(repos.get_node(path, changeset.rev))
+                so = self._fill_so(changeset,
+                                   repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif change == Changeset.MOVE:
                 so = FullTextSearchObject(
                         self.project, realm=u'versioncontrol', id=base_path,
                         action='DELETE')
                 sos.append(so)
-                so = self._fill_so(repos.get_node(path, changeset.rev))
+                so = self._fill_so(changeset,
+                                   repos.get_node(path, changeset.rev))
                 sos.append(so)
             elif change == Changeset.DELETE:
                 so = FullTextSearchObject(
