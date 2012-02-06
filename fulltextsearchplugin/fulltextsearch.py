@@ -1,30 +1,26 @@
 from Queue import Queue
 import os
-from genshi.builder import tag
 from datetime import datetime
 import re
 import sunburnt
 import types
 
 from trac.env import IEnvironmentSetupParticipant
-from trac.admin import AdminCommandError, IAdminCommandProvider
-from trac.core import Component, implements, TracError, Interface
-from trac.web.chrome import add_stylesheet
+from trac.admin import IAdminCommandProvider
+from trac.core import Component, implements, Interface
 from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
 from trac.ticket.model import Ticket, Milestone
 from trac.wiki.api import IWikiChangeListener, WikiSystem
 from trac.wiki.model import WikiPage
 from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener, Attachment
-from trac.versioncontrol.api import IRepositoryChangeListener, Changeset, Node
-from trac.core import ExtensionPoint
-from trac.resource import get_resource_name, get_resource_shortname
+from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
+from trac.resource import get_resource_shortname
 from trac.search import ISearchSource, shorten_result
-from trac.util.translation import _, tag_
+from trac.util.translation import _
 from trac.config import Option
 from trac.util import datefmt
-from trac.search.web_ui import SearchModule
-from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
+from trac.util.datefmt import to_utimestamp, utc
 
 __all__ = ['IFullTextSearchSource', 'FullTextSearchModule',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
@@ -194,7 +190,7 @@ class FullTextSearch(Component):
                         AND filename = c_filename AND version = c_version
                 ORDER BY time""")
         else:
-             cursor.execute(
+            cursor.execute(
                 "SELECT type,id,filename,description,size,time,author,ipnr "
                 "FROM attachment"
                 )
@@ -231,14 +227,14 @@ class FullTextSearch(Component):
             self.upgrade_environment(db)
 
     def environment_needs_upgrade(self, db):
-       cursor = db.cursor()
-       cursor.execute("SELECT value FROM system WHERE name = %s",
-                      ('fulltextsearch_last_fullindex',))
-       result = cursor.fetchone()
-       if result is None:
-           # Use Logica extension/tweak to perform reindex last and stand a
-           # better chance of including everything
-           return 'defer'
+        cursor = db.cursor()
+        cursor.execute("SELECT value FROM system WHERE name = %s",
+                       ('fulltextsearch_last_fullindex',))
+        result = cursor.fetchone()
+        if result is None:
+            # Use Logica extension/tweak to perform reindex last and stand a
+            # better chance of including everything
+            return 'defer'
 
     def upgrade_environment(self, db):
         cursor = db.cursor()
