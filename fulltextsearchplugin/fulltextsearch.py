@@ -469,6 +469,11 @@ class FullTextSearch(Component):
         yield (u'attachment', u'Attachments', True)
 
     def _build_filter_query(self, si, filters):
+        """Return a SOLR filter query that matches any of the chosen filters
+        (realms).
+        
+        The filter is of the form realm:realm1 OR realm:realm2 OR ...
+        """
         Q = si.query().Q
         my_filters = filters[:]
         for field in my_filters:
@@ -496,8 +501,16 @@ class FullTextSearch(Component):
             self.log.debug("Found wildcard query, switching to standard parser")
             result = si.query(terms).filter(filter_q).facet_by('realm').execute()
         else:
-            opts = {'q':terms,'qt':"dismax", 'facet':True, 'facet.field':"realm",
-                    'fq':filter_q}
+            opts = {
+                # Search for terms (q) using dismax query type (qt).
+                # No query fields (qf) are specified so search in default
+                # fields, with default weightings
+                'q': terms, 'qt': "dismax",
+                # As well as the results, return num of results in each realm
+                'facet': True, 'facet.field': "realm",
+                # Filter query results by realm and project
+                'fq': filter_q,
+                }
             result = si.search(**opts)
         self.log.debug("Facets: %s", result.facet_counts.facet_fields)
         for doc in result.result.docs:
