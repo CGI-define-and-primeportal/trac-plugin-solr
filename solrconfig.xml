@@ -772,9 +772,9 @@
   <!-- Solr Cell: http://wiki.apache.org/solr/ExtractingRequestHandler -->
   <requestHandler name="/update/extract" class="org.apache.solr.handler.extraction.ExtractingRequestHandler" startup="lazy">
     <lst name="defaults">
-      <!-- All the main content goes into "text"... if you need to return
-           the extracted text or do highlighting, use a stored field. -->
-      <str name="fmap.content">text</str>
+      <!-- #define customisation, place any extracted text in the body field.
+           See docs at above URL for configuration options. -->
+      <str name="fmap.content">body</str>
       <str name="lowernames">true</str>
       <str name="uprefix">ignored_</str>
 
