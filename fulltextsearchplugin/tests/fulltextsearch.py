@@ -16,6 +16,12 @@ from trac.wiki import WikiPage
 from fulltextsearchplugin.fulltextsearch import (FullTextSearchObject, Backend,
                                                  FullTextSearch,
                                                  )
+from trac.versioncontrol.api import RepositoryManager, DbRepositoryProvider
+from trac.loader import load_components
+import pkg_resources
+from trac.versioncontrol import svn_fs
+from svn import core, repos
+from trac_browser_svn_ops.svn_fs import SubversionWriter
 
 class MockBackend(Backend):
     def __init__(self, endpoint):
@@ -229,6 +235,68 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
 
+
+class ChangesetsSvnTestCase(unittest.TestCase):
+    @classmethod
+    def setupClass(cls):
+        svn_fs._import_svn()
+        core.apr_initialize()
+        pool = core.svn_pool_create(None)
+        dumpstream = None
+        cls.repos_path = tempfile.mkdtemp(prefix='svn-tmp')
+        shutil.rmtree(cls.repos_path)
+        dumpfile = open(os.path.join(os.path.split(__file__)[0], 'svn.dump'))
+        try:
+            r = repos.svn_repos_create(cls.repos_path, '', '', None, None, pool)
+            if hasattr(repos, 'svn_repos_load_fs2'):
+                repos.svn_repos_load_fs2(r, dumpfile, StringIO(),
+                                        repos.svn_repos_load_uuid_default, '',
+                                        0, 0, None, pool)
+            else:
+                dumpstream = core.svn_stream_from_aprfile(dumpfile, pool)
+                repos.svn_repos_load_fs(r, dumpstream, None,
+                                        repos.svn_repos_load_uuid_default, '',
+                                        None, None, pool)
+        finally:
+            if dumpstream:
+                core.svn_stream_close(dumpstream)
+            core.svn_pool_destroy(pool)
+            core.apr_terminate()
+    @classmethod
+    def teardownClass(cls):
+        if os.name == 'nt':
+            # The Windows version of 'shutil.rmtree' doesn't override the
+            # permissions of read-only files, so we have to do it ourselves:
+            import stat
+            format_file = os.path.join(cls.repos_path, 'db', 'format')
+            if os.path.isfile(format_file):
+                os.chmod(format_file, stat.S_IRWXU)
+            os.chmod(os.path.join(cls.repos_path, 'format'), stat.S_IRWXU)
+        shutil.rmtree(cls.repos_path)
+    
+    def setUp(self):
+        self.env = EnvironmentStub(enable=['trac.*', FullTextSearch])
+        DbRepositoryProvider(self.env).add_repository('', self.repos_path, 'svn')
+        self.repos = self.env.get_repository('')
+        self.repos.sync()
+        self.fts = FullTextSearch(self.env)
+        self.fts.backend = MockBackend(self.fts.solr_endpoint)
+        
+    def tearDown(self):
+        self.env.reset_db()
+        self.repos.close()
+        self.repos = None
+    
+    def test_reindex_svn(self):
+        assert self.repos.youngest_rev == self.fts._reindex_svn()
+    
+    def test_add_changeset(self):
+        sw = SubversionWriter(self.env, self.repos, 'kalle')
+        sw.put_content('/trunk/foo.txt', content='Foo Bar', commit_msg='A comment')
+        self.repos.sync()
+        so = self.fts.backend.get(block=False)
+        import pdb; pdb.set_trace()
+        
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))
