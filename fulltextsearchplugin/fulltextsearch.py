@@ -144,15 +144,19 @@ class FullTextSearch(Component):
     def _reindex_svn(self):
         """Iterate all changesets and call self.changeset_added on them"""
         repo = self.env.get_repository()
-        rev = repo.oldest_rev
-        revs = 0
-        while repo.next_rev(rev):
+        def all_revs():
+            rev = repo.oldest_rev
+            yield rev
+            while 1:
+                rev = repo.next_rev(rev)
+                if rev is None:
+                    return
+                yield rev
+        for cnt, rev in enumerate(all_revs(), 1):
             self.changeset_added(repo, repo.get_changeset(rev))
-            rev = repo.next_rev(rev)
-            revs += 1
         self.log.debug('Reindexed %s changesets (oldest:%s, youngest:%s)',
-                       revs, repo.oldest_rev, repo.youngest_rev)
-        return revs
+                       cnt, repo.oldest_rev, repo.youngest_rev)
+        return cnt
 
     def _reindex_wiki(self):
         for name in WikiSystem(self.env).get_pages():
