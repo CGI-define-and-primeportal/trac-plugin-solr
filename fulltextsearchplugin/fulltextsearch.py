@@ -142,22 +142,17 @@ class FullTextSearch(Component):
         self.project = os.path.split(self.env.path)[1]
 
     def _reindex_svn(self):
-        # FIXME This mock class is the closest we get to a `Changeset` object
-        #       during a full reindex. Hence commit messages are not
-        #       searchable following a reindex
-        class MockChangeset(list):
-            message = ''
-            def get_changes(self):
-                return self
+        """Iterate all changesets and call self.changeset_added on them"""
         repo = self.env.get_repository()
-        mc = MockChangeset()
-        mc.rev = repo.youngest_rev
-        for path in repo.traverse():
-            if path.endswith('/'):
-                continue
-            mc.append((path, Node.FILE, Changeset.ADD, None, -1))
-        self.changeset_added(repo, mc)
-        return len(mc)
+        rev = repo.oldest_rev
+        revs = 0
+        while repo.next_rev(rev):
+            self.changeset_added(repo, repo.get_changeset(rev))
+            rev = repo.next_rev(rev)
+            revs += 1
+        self.log.debug('Reindexed %s changesets (oldest:%s, youngest:%s)',
+                       revs, repo.oldest_rev, repo.youngest_rev)
+        return revs
 
     def _reindex_wiki(self):
         for name in WikiSystem(self.env).get_pages():
@@ -215,9 +210,11 @@ class FullTextSearch(Component):
         self.backend.empty_proj(self.project)
         num_milestone = self._reindex_milestone()
         num_tickets = self._reindex_ticket()
-        num_attachement = self._reindex_attachment()
+        num_attachment = self._reindex_attachment()
         num_svn = self._reindex_svn()
         num_wiki = self._reindex_wiki()
+        self.log.debug('Reindexed %s milestones, %s tickets, %s attachments, %s changesets, %s wiki pages', 
+                       num_milestone, num_tickets, num_attachment, num_svn, num_wiki)
         return num_svn
 
     # IEnvironmentSetupParticipant methods
