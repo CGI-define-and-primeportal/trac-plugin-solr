@@ -140,8 +140,8 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertEquals(attachment.date, so.changed)
         self.assertTrue('Santa' in so.involved)
         #self.assertTrue('Lorem ipsum' in so.oneline) # TODO
-        self.assertTrue('Lorem ipsum' in so.body)
-        self.assertTrue('Summary line' in so.body)
+        self.assertTrue('Lorem ipsum' in so.body.read())
+        self.assertTrue('Summary line' in so.comments)
 
     def test_ticket(self):
         self.env.config.set('ticket-custom', 'foo', 'text')
@@ -175,7 +175,8 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertEquals(ticket['changetime'], so.changed)
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
-        self.assertTrue('Could eat no fat' in so.body)
+        self.assertTrue('Could eat no fat' in so.comments)
+        
 
     def test_wiki_page(self):
         page = WikiPage(self.env, 'NewPage')
@@ -202,7 +203,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertEquals(page.time, so.changed)
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
-        self.assertTrue('Could eat no fat' in so.body)
+        self.assertTrue('Could eat no fat' in so.comments)
     
     def test_wiki_page_unicode_error(self):
         import pkg_resources
@@ -288,14 +289,18 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         self.repos = None
     
     def test_reindex_svn(self):
-        assert self.repos.youngest_rev == self.fts._reindex_svn()
+        self.assertEquals(self.repos.youngest_rev, self.fts._reindex_svn())
     
     def test_add_changeset(self):
         sw = SubversionWriter(self.env, self.repos, 'kalle')
-        sw.put_content('/trunk/foo.txt', content='Foo Bar', commit_msg='A comment')
-        self.repos.sync()
+        new_rev = sw.put_content('/trunk/foo.txt', content='Foo Bar', commit_msg='A comment')
+        RepositoryManager(self.env).notify('changeset_added', '', [new_rev])
         so = self.fts.backend.get(block=False)
-        import pdb; pdb.set_trace()
+        self.assertEquals(so.body.read(), 'Foo Bar')
+        self.assertTrue('A comment' in so.comments)
+        self.assertTrue('foo.txt' in so.id)
+        self.assertTrue(str(self.repos.youngest_rev) in so.oneline)
+        self.assertTrue('kalle' in so.author)
         
 def suite():
     suite = unittest.TestSuite()
