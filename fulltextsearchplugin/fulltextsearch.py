@@ -62,6 +62,10 @@ class FullTextSearchObject(object):
         self.body = body
         self.comments = comments
         self.action = action
+    def __repr__(self):
+        from pprint import pformat
+        r = '<FullTextSearchObject %s>' % pformat(self.__dict__)
+        return r
 
 
 class Backend(Queue):
@@ -411,16 +415,21 @@ class FullTextSearch(Component):
                 self.project,
                 realm = u'versioncontrol', id=node.path,
                 title = node.path,
-                oneline = changeset.message,
+                oneline = u'[%s]: %s' % (changeset.rev, shorten_result(changeset.message)),
+                comments = [changeset.message],
                 body = node.get_content(),
                 changed = node.get_last_modified(),
                 action = 'CREATE',
+                author = changeset.author,
+                created = changeset.date
                 )
         return so
 
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
+        # FIXME: This should really create an index of both changesets and
+        # files (two realms; source and changeset)
         sos = []
         for path, kind, change, base_path, base_rev in changeset.get_changes():
             #FIXME handle kind == Node.DIRECTORY
