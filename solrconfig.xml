@@ -57,7 +57,11 @@
        that matches, it will be ignored
     -->
   <!--lib dir="../../contrib/clustering/lib/downloads/" /-->
-  <lib dir="../../contrib/clustering/lib/" />
+  <lib dir="/usr/share/java/solrj-lib/contrib/clustering/" />
+  <lib dir="/usr/share/java/solrj-lib/contrib/dataimporthandler/" />
+  <lib dir="/usr/share/java/solrj-lib/contrib/extraction/" />
+  <lib dir="/usr/share/java/solrj-lib/contrib/velocity/" />
+
   <!--lib dir="/total/crap/dir/ignored" /--> 
   <!-- an exact path can be used to specify a specific file.  This will cause
        a serious error to be logged if it can't be loaded.
