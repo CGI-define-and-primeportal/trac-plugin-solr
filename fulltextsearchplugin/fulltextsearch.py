@@ -156,8 +156,9 @@ class FullTextSearch(Component):
                 if rev is None:
                     return
                 yield rev
-        for cnt, rev in enumerate(all_revs(), 1):
+        for i, rev in enumerate(all_revs()):
             self.changeset_added(repo, repo.get_changeset(rev))
+        cnt = i + 1
         self.log.debug('Reindexed %s changesets (oldest:%s, youngest:%s)',
                        cnt, repo.oldest_rev, repo.youngest_rev)
         return cnt
