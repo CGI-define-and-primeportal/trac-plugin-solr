@@ -493,7 +493,9 @@ class FullTextSearch(Component):
                 return Q(realm=list1.pop()) | Q(realm=list1.pop())
             elif len(list1) == 1:
                 return Q(realm=list1.pop())
-            else: 
+            else:
+                # NB A TypeError will be raised if this string is combined
+                #    with a LuceneQuery
                 return ""
         return rec(my_filters[:])
 
@@ -503,7 +505,17 @@ class FullTextSearch(Component):
             si = sunburnt.SolrInterface(self.solr_endpoint)
         except:
             return #until solr is packaged
-        filter_q = self._build_filter_query(si, filters) & si.query().Q(project=self.project)
+
+        # Restrict search to chosen realms, if none of our filters were chosen
+        # then we won't have any results - return early, empty handed
+        # NB Also avoids TypeError if _build_filter_query() returns a string
+        filter_q = self._build_filter_query(si, filters)
+        if not filter_q:
+            return
+
+        # The index can store multiple projects, restrict results to this one
+	filter_q &= si.query().Q(project=self.project)
+
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
             result = si.query(terms).filter(filter_q).facet_by('realm').execute()
