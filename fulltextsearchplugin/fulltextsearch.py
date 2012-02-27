@@ -6,8 +6,9 @@ import sunburnt
 import types
 
 from trac.env import IEnvironmentSetupParticipant
-from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
 from trac.core import Component, implements, Interface, TracError
+from trac.ticket.api import (ITicketChangeListener, IMilestoneChangeListener,
+                             TicketSystem)
 from trac.ticket.model import Ticket, Milestone
 from trac.wiki.api import IWikiChangeListener, WikiSystem
 from trac.wiki.model import WikiPage
@@ -129,8 +130,6 @@ class Backend(Queue):
             except Exception:
                 self.log.error('%s %r', item, item)
                 raise
-                
-        
 
 
 class FullTextSearch(Component):
