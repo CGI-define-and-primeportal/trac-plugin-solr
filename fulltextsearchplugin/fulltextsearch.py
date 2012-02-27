@@ -26,6 +26,9 @@ __all__ = ['IFullTextSearchSource', 'FullTextSearchModule',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
            ]
 
+def _do_nothing(*args, **kwargs):
+    pass
+
 class IFullTextSearchSource(Interface):
     pass
 
@@ -246,17 +249,6 @@ class FullTextSearch(Component):
         i = -1
         for i, milestone in enumerate(Milestone.select(self.env)):
             self.milestone_created(milestone)
-            
-    def reindex(self):
-        self.backend.empty_proj(self.project)
-        num_milestone = self._reindex_milestone()
-        num_tickets = self._reindex_ticket()
-        num_attachment = self._reindex_attachment()
-        num_svn = self._reindex_svn()
-        num_wiki = self._reindex_wiki()
-        self.log.debug('Reindexed %s milestones, %s tickets, %s attachments, %s changesets, %s wiki pages', 
-                       num_milestone, num_tickets, num_attachment, num_svn, num_wiki)
-        return num_svn
             feedback(realm, milestone)
         return i + 1
 
@@ -283,6 +275,22 @@ class FullTextSearch(Component):
                       self._fmt_realms(realms))
         self.backend.remove(self.project, realms)
 
+    def index(self, realms=None, clean=False, feedback=None, finish_fb=None):
+        realms = self._check_realms(realms)
+        feedback = feedback or _do_nothing
+        finish_fb = finish_fb or _do_nothing
+
+        if clean:
+            self.remove_index(realms)
+        self.log.info("Started indexing realms: %s",
+                      self._fmt_realms(realms))
+        for realm in realms:
+            indexer = self._indexers[realm]
+            num_indexed = indexer(realm, feedback, finish_fb)
+            self.log.debug('Indexed %i resources in realm: "%s"',
+                           num_indexed, realm)
+        self.log.info("Completed indexing realms: %s",
+                      self._fmt_realms(realms))
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
@@ -302,7 +310,7 @@ class FullTextSearch(Component):
 
     def upgrade_environment(self, db):
         cursor = db.cursor()
-        self.reindex()
+        self.index()
         t = to_utimestamp(datetime.now(utc))
         cursor.execute("INSERT INTO system (name, value) VALUES (%s,%s)",
                        ('fulltextsearch_last_fullindex', t))
