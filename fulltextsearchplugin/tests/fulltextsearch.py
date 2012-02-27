@@ -23,15 +23,69 @@ from trac.versioncontrol import svn_fs
 from svn import core, repos
 from trac_browser_svn_ops.svn_fs import SubversionWriter
 
-class MockBackend(Backend):
-    def __init__(self, endpoint):
-        log = logging.getLogger('MockBackend')
-        Backend.__init__(self, endpoint, log)
-    def empty_proj(self):
-        pass
+class MockSolrInterface(object):
+    """A bare minimum, in process simulation of sunburnt SolrInterface
+    
+    Submitted documents are stored as a class attribute, so all instances share
+    the submitted documents. No transaction isolation. No schema enforcement.
+    No document extraction. No indexing. Only equality searches,
+    with a search string of the form `field:value` are implemented by .query().
+    
+    To aid testing a history of add/delete operations is maintained.
+    """
+
+    docs = {} # Committed documents - keyed by id, shared by all instanced
+    hist = [] # History of operations - in the order committed
+
+    def __init__(self, end_point):
+        self.pending = []
+        self.writable = True
+
+    def _doc2docs(self, doc_or_docs):
+        if hasattr(doc_or_docs, 'id'):
+            docs = [doc_or_docs]
+        elif doc_or_docs:
+            docs = doc_or_docs
+        else:
+            docs = []
+        return docs
+
+    def add(self, docs, extract=False):
+        docs = self._doc2docs(docs)
+        for doc in docs:
+            self.pending.append(('add', doc.id, doc))
+
+    def delete(self, docs=None, queries=None):
+        docs = self._doc2docs(docs)
+        for query in queries or []:
+            docs += self.query(query)
+        for doc in docs:
+            self.pending.append(('delete', doc.id, doc))
+
+    def delete_all(self):
+        for doc in self.docs:
+            self.pending.append(('delete', doc.id, doc))
+
+    def query(self, query):
+        field, val = query.split(':', 1)
+        return [doc for doc in self.docs.itervalues()
+                    if getattr(doc, field, None) == val]
 
     def commit(self):
-        pass
+        for op, docid, doc in self.pending:
+            if op == 'delete':
+                self.docs.pop(docid, None)
+            elif op == 'add':
+                self.docs[docid] = doc
+            self.hist.append((op,docid,doc))
+        self.pending = []
+
+    @classmethod
+    def _reset(cls):
+        cls.docs = {}
+        cls.hist = []
+
+
 
 class FullTextSearchObjectTestCase(unittest.TestCase):
     def setUp(self):
@@ -114,7 +168,8 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.basename = os.path.basename(self.env.path)
         #self.env.config.set('search', 'solr_endpoint', 'http://localhost:8983/solr/')
         self.fts = FullTextSearch(self.env)
-        self.fts.backend = MockBackend(self.fts.solr_endpoint)
+        self.fts.backend = Backend(self.fts.solr_endpoint, self.env.log,
+                                   MockSolrInterface)
 
     def tearDown(self):
         shutil.rmtree(self.env.path)
@@ -124,7 +179,8 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertEquals(self.basename, self.fts.project)
 
     def _get_so(self):
-        return self.fts.backend.get(block=False)
+        si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
+        return si.hist[-1][2]
 
     def test_attachment(self):
         attachment = Attachment(self.env, 'ticket', 42)
@@ -281,13 +337,18 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         self.repos = self.env.get_repository('')
         self.repos.sync()
         self.fts = FullTextSearch(self.env)
-        self.fts.backend = MockBackend(self.fts.solr_endpoint)
+        self.fts.backend = Backend(self.fts.solr_endpoint, self.env.log,
+                                   MockSolrInterface)
         
     def tearDown(self):
         self.env.reset_db()
         self.repos.close()
         self.repos = None
     
+    def _get_so(self):
+        si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
+        return si.hist[-1][2]
+
     def test_reindex_svn(self):
         self.assertEquals(self.repos.youngest_rev, self.fts._reindex_svn())
     
@@ -295,7 +356,7 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         sw = SubversionWriter(self.env, self.repos, 'kalle')
         new_rev = sw.put_content('/trunk/foo.txt', content='Foo Bar', commit_msg='A comment')
         RepositoryManager(self.env).notify('changeset_added', '', [new_rev])
-        so = self.fts.backend.get(block=False)
+        so = self._get_so()
         self.assertEquals(so.body.read(), 'Foo Bar')
         self.assertTrue('A comment' in so.comments)
         self.assertTrue('foo.txt' in so.id)

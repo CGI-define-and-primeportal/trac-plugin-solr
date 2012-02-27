@@ -72,10 +72,11 @@ class Backend(Queue):
     """
     """
 
-    def __init__(self, solr_endpoint, log):
+    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface):
         Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
+        self.si_class = si_class
 
     def create(self, item):
         item.action = 'CREATE'
@@ -101,13 +102,13 @@ class Backend(Queue):
         self.commit()
         
     def empty_proj(self, project_id):
-        s = sunburnt.SolrInterface(self.solr_endpoint)
+        s = self.si_class(self.solr_endpoint)
         # I would have like some more info back
         s.delete(queries = u"id:%s.*" % project_id)
         s.commit()
 
     def commit(self):
-        s = sunburnt.SolrInterface(self.solr_endpoint)
+        s = self.si_class(self.solr_endpoint)
         while not self.empty():
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
@@ -502,7 +503,7 @@ class FullTextSearch(Component):
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
         try:
-            si = sunburnt.SolrInterface(self.solr_endpoint)
+            si = sunburnt.backend.si_class(self.solr_endpoint)
         except:
             return #until solr is packaged
 
