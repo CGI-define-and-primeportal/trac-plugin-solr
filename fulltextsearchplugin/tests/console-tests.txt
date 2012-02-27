@@ -1,0 +1,6 @@
+===== test_reindex_milestone =====
+Wiping search index and re-indexing all items in realms: milestone
+Indexing finished
+===== test_reindex_unknown =====
+Wiping search index and re-indexing all items in realms: unknown_realm
+TracError: These realms are not supported by FullTextSearch: unknown_realm

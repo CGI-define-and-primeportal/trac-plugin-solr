@@ -46,6 +46,7 @@ setup(
     entry_points = {
         'trac.plugins': [
             'fulltextsearchplugin.fulltextsearch = fulltextsearchplugin.fulltextsearch',
+            'fulltextsearchplugin.admin = fulltextsearchplugin.admin',
         ]    
     },
     test_suite = 'fulltextsearchplugin.tests.suite',
