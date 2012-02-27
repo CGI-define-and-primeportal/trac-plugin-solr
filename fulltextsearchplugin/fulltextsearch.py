@@ -6,7 +6,6 @@ import sunburnt
 import types
 
 from trac.env import IEnvironmentSetupParticipant
-from trac.admin import IAdminCommandProvider
 from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
 from trac.core import Component, implements, Interface, TracError
 from trac.ticket.model import Ticket, Milestone
@@ -139,7 +138,7 @@ class FullTextSearch(Component):
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener, ISearchSource, IAdminCommandProvider,
+               IRepositoryChangeListener, ISearchSource,
                IEnvironmentSetupParticipant)
 
     solr_endpoint = Option("search", "solr_endpoint",
@@ -626,16 +625,5 @@ class FullTextSearch(Component):
             if '*' in term:
                 return True
         return False
-    #IAdminCommandProvider methods
-    def get_admin_commands(self):
-        yield ('fulltext reindex', '',
-               'Throw away everything in text index and add it again',
-               self._complete_admin_command, self._admin_reindex)
 
-    def _complete_admin_command(self, args):
-        return []
-
-    def _admin_reindex(self):
-        self.reindex()
-        print "reindex done"
 
