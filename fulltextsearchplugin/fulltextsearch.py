@@ -166,6 +166,7 @@ class FullTextSearch(Component):
 
     def _reindex_svn(self, realm, feedback, finish_fb):
         """Iterate all changesets and call self.changeset_added on them"""
+        # TODO Multiple repository support
         repo = self.env.get_repository()
         def all_revs():
             rev = repo.oldest_rev
