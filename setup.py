@@ -49,4 +49,6 @@ setup(
         ]    
     },
     test_suite = 'fulltextsearchplugin.tests.suite',
+    tests_require = ['TracBrowserSvnOperations',
+                     ],
 )

@@ -398,8 +398,17 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
         return si.hist[-1][2]
 
+    def _feedback(self, realm, resource):
+        pass
+
+    def _finish_fb(self, realm, resource):
+        pass
+
     def test_reindex_svn(self):
-        self.assertEquals(self.repos.youngest_rev, self.fts._reindex_svn())
+        self.assertEquals(self.repos.youngest_rev,
+                          self.fts._reindex_svn('versionconrol',
+                                                self._feedback,
+                                                self._finish_fb))
     
     def test_add_changeset(self):
         sw = SubversionWriter(self.env, self.repos, 'kalle')
@@ -417,6 +426,11 @@ def suite():
     suite.addTest(unittest.makeSuite(BackendTestCase, 'test'))
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))
     suite.addTest(unittest.makeSuite(FullTextSearchTestCase, 'test'))
+    # ChangesetsSvnTestCase currently only run under nosetest, under vanilla
+    # unittest .setUp() will raise
+    # AttributeError: 'ChangesetsSvnTestCase' object has no attribute
+    # 'repos_path'
+    #suite.addTest(unittest.makeSuite(ChangesetsSvnTestCase, 'test'))
     return suite
 
 if __name__ == '__main__':
