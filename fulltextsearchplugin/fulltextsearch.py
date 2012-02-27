@@ -145,8 +145,22 @@ class FullTextSearch(Component):
     def __init__(self):
         self.backend = Backend(self.solr_endpoint, self.log)
         self.project = os.path.split(self.env.path)[1]
+        self._realms = [
+            (u'ticket',     u'Tickets',     True,   self._reindex_ticket),
+            (u'wiki',       u'Wiki',        True,   self._reindex_wiki),
+            (u'milestone',  u'Milestones',  True,   self._reindex_milestone),
+            (u'changeset',  u'Changesets',  True,   None),
+            (u'versioncontrol', u'File archive', True,  self._reindex_svn),
+            (u'attachment', u'Attachments', True,   self._reindex_attachment),
+            ]
+        self._indexers = dict((name, indexer) for name, label, enabled, indexer
+                                              in self._realms if indexer)
 
     def _reindex_svn(self):
+    @property
+    def realms(self):
+        return self._indexers.keys()
+
         """Iterate all changesets and call self.changeset_added on them"""
         repo = self.env.get_repository()
         def all_revs():
@@ -469,12 +483,8 @@ class FullTextSearch(Component):
     # ISearchSource methods.
 
     def get_search_filters(self, req):
-        yield (u'ticket', u'Tickets', True)
-        yield (u'wiki', u'Wiki', True)
-        yield (u'milestone', u'Milestones', True)
-        yield (u'changeset', u'Changesets', True)
-        yield (u'versioncontrol', u'File archive', True)
-        yield (u'attachment', u'Attachments', True)
+        return [(name, label, enabled) for name, label, enabled, indexer 
+                                       in self._realms]
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
