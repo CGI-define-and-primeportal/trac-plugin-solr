@@ -7,8 +7,8 @@ import types
 
 from trac.env import IEnvironmentSetupParticipant
 from trac.admin import IAdminCommandProvider
-from trac.core import Component, implements, Interface
 from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
+from trac.core import Component, implements, Interface, TracError
 from trac.ticket.model import Ticket, Milestone
 from trac.wiki.api import IWikiChangeListener, WikiSystem
 from trac.wiki.model import WikiPage
@@ -101,10 +101,12 @@ class Backend(Queue):
             self.put(item)
         self.commit()
         
-    def empty_proj(self, project_id):
+    def remove(self, project_id, realms=None):
         s = self.si_class(self.solr_endpoint)
+        realms = realms or []
         # I would have like some more info back
-        s.delete(queries = u"id:%s.*" % project_id)
+        s.delete(queries=[u"id:%s.*" % project_id] +
+                         [u"realm:%s" % realm for realm in realms])
         s.commit()
 
     def commit(self):
@@ -240,6 +242,29 @@ class FullTextSearch(Component):
         self.log.debug('Reindexed %s milestones, %s tickets, %s attachments, %s changesets, %s wiki pages', 
                        num_milestone, num_tickets, num_attachment, num_svn, num_wiki)
         return num_svn
+    def _check_realms(self, realms):
+        """Check specfied realms are supported by this component
+        
+        Raise exception if unsupported realms are found.
+        """
+        if realms is None:
+            realms = self.realms
+        unsupported_realms = set(realms).difference(set(self.realms))
+        if unsupported_realms:
+            raise TracError(_("These realms are not supported by "
+                              "FullTextSearch: %(realms)s",
+                              realms=self._fmt_realms(unsupported_realms)))
+        return realms
+
+    def _fmt_realms(self, realms):
+        return ', '.join(realms)
+
+    def remove_index(self, realms=None):
+        realms = self._check_realms(realms)
+        self.log.info("Removing realms from index: %s",
+                      self._fmt_realms(realms))
+        self.backend.remove(self.project, realms)
+
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
