@@ -21,7 +21,7 @@ from trac.config import Option
 from trac.util import datefmt
 from trac.util.datefmt import to_utimestamp, utc
 
-__all__ = ['IFullTextSearchSource', 'FullTextSearchModule',
+__all__ = ['IFullTextSearchSource',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
            ]
 
