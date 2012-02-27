@@ -572,7 +572,7 @@ class FullTextSearch(Component):
             return
 
         # The index can store multiple projects, restrict results to this one
-	filter_q &= si.query().Q(project=self.project)
+        filter_q &= si.query().Q(project=self.project)
 
         if self._has_wildcard(terms):
             self.log.debug("Found wildcard query, switching to standard parser")
