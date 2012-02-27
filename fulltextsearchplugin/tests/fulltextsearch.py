@@ -393,7 +393,7 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         self.env.reset_db()
         self.repos.close()
         self.repos = None
-    
+
     def _get_so(self):
         si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
         return si.hist[-1][2]
@@ -420,7 +420,8 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         self.assertTrue('foo.txt' in so.id)
         self.assertTrue(str(self.repos.youngest_rev) in so.oneline)
         self.assertTrue('kalle' in so.author)
-        
+
+
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(BackendTestCase, 'test'))
