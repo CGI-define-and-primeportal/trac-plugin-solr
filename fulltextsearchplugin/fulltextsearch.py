@@ -543,10 +543,7 @@ class FullTextSearch(Component):
         The filter is of the form realm:realm1 OR realm:realm2 OR ...
         """
         Q = si.query().Q
-        my_filters = filters[:]
-        for field in my_filters:
-            if field not in [shortname for (shortname,t2,t3) in self.get_search_filters(None)]:
-                my_filters.remove(field)
+        my_filters = [f for f in filters if f in self.realms]
         def rec(list1):
             if len(list1) > 2:
                 return Q(realm=list1.pop()) | rec(list1)
