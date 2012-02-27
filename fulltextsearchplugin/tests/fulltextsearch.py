@@ -38,6 +38,7 @@ class MockSolrInterface(object):
     hist = [] # History of operations - in the order committed
 
     def __init__(self, end_point):
+        self.end_point = end_point
         self.pending = []
         self.writable = True
 
@@ -85,6 +86,54 @@ class MockSolrInterface(object):
         cls.docs = {}
         cls.hist = []
 
+
+class BackendTestCase(unittest.TestCase):
+    def setUp(self):
+        self.log = logging.getLogger('BackendTestCase')
+        self.endpoint = 'http://localhost/mock'
+        self.project = 'ftstest'
+
+    def tearDown(self):
+        MockSolrInterface._reset()
+
+    def _fts_obj(self, project, realm, id):
+        return FullTextSearchObject(
+            project, realm=realm, id=id,
+            title='Title', author='admin',
+            created=datetime(2001, 1, 1, tzinfo=utc), # A space odyssey
+            changed=datetime(2010, 1, 1, tzinfo=utc), # Year we make contact
+            oneline='oneline', tags='tags',
+            involved=['Alice', 'Bob', 'Charlie'],
+            popularity=0,
+            body='Lorem ipsum dolor sit amet',
+            comments=['Comment is free', 'but facts are sacred'],
+            )
+
+    def test_init(self):
+        backend = Backend(self.endpoint, self.log, MockSolrInterface)
+        self.assertEquals(backend.solr_endpoint, self.endpoint)
+        self.assertEquals(backend.log, self.log)
+        self.assertEquals(backend.si_class, MockSolrInterface)
+
+    def test_create(self):
+        backend = Backend(self.endpoint, self.log, MockSolrInterface)
+        backend.create(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        si = backend.si_class(backend.solr_endpoint)
+        self.assertEquals(1, len(si.query('realm:wiki')))
+
+    def test_modify(self):
+        backend = Backend(self.endpoint, self.log, MockSolrInterface)
+        backend.create(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        backend.modify(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        si = backend.si_class(backend.solr_endpoint)
+        self.assertEquals(1, len(si.query('realm:wiki')))
+
+    def test_delete(self):
+        backend = Backend(self.endpoint, self.log, MockSolrInterface)
+        backend.create(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        backend.delete(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        si = backend.si_class(backend.solr_endpoint)
+        self.assertEquals(0, len(si.query('realm:wiki')))
 
 
 class FullTextSearchObjectTestCase(unittest.TestCase):
@@ -365,6 +414,7 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         
 def suite():
     suite = unittest.TestSuite()
+    suite.addTest(unittest.makeSuite(BackendTestCase, 'test'))
     suite.addTest(unittest.makeSuite(FullTextSearchObjectTestCase, 'test'))
     suite.addTest(unittest.makeSuite(FullTextSearchTestCase, 'test'))
     return suite
