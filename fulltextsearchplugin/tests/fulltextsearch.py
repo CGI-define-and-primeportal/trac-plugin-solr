@@ -221,6 +221,7 @@ class FullTextSearchTestCase(unittest.TestCase):
                                    MockSolrInterface)
 
     def tearDown(self):
+        MockSolrInterface._reset()
         shutil.rmtree(self.env.path)
         self.env.reset_db()
 
