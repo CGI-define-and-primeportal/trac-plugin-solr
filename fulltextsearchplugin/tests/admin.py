@@ -8,6 +8,7 @@ from trac.admin import console
 from trac.admin.tests.console import (STRIP_TRAILING_SPACE,
                                       load_expected_results)
 from trac.test import EnvironmentStub
+from trac.ticket import Ticket, Milestone
 
 from fulltextsearchplugin.admin import FullTextSearchAdmin
 from fulltextsearchplugin.fulltextsearch import Backend, FullTextSearch
@@ -76,6 +77,10 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
                                       "%r != %r\n%s" %
                                       (expected_results, output, output_diff))
 
+    def _get_docs(self):
+        si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
+        return si.docs
+
     def test_command_suggest(self):
         """Test suggestions as if the user typed "fulltext <TAB>"
         """
@@ -104,6 +109,55 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
         expected = self.expected_results[test_name]
         rv, output = self._execute('fulltext reindex unknown_realm')
         self.assertEqual(expected, output)
+
+    def test_remove_all(self):
+        test_name = sys._getframe().f_code.co_name
+        expected = self.expected_results[test_name]
+        ticket = Ticket(self.env)
+        ticket.populate({'reporter': 'santa', 'summary': 'Summary line',
+                         'description': 'Lorem ipsum dolor sit amet',
+                         })
+        ticket.insert()
+        self.assertEqual(1, len(self._get_docs()))
+        rv, output = self._execute('fulltext remove')
+        self.assertEqual(expected, output)
+        self.assertEqual(0, len(self._get_docs()))
+
+    def test_remove_all_empty(self):
+        test_name = sys._getframe().f_code.co_name
+        expected = self.expected_results[test_name]
+        rv, output = self._execute('fulltext remove')
+        self.assertEqual(expected, output)
+
+    def test_remove_milestone(self):
+        test_name = sys._getframe().f_code.co_name
+        expected = self.expected_results[test_name]
+        ticket = Ticket(self.env)
+        ticket.populate({'reporter': 'santa', 'summary': 'Summary line',
+                         'description': 'Lorem ipsum dolor sit amet',
+                         })
+        ticket.insert()
+        milestone = Milestone(self.env)
+        milestone.name = 'New target date'
+        milestone.description = 'Lorem ipsum dolor sit amet'
+        milestone.insert()
+        self.assertEqual(2, len(self._get_docs()))
+        rv, output = self._execute('fulltext remove milestone')
+        self.assertEqual(expected, output)
+        self.assertEqual(1, len(self._get_docs()))
+
+    def test_remove_milestone_empty(self):
+        test_name = sys._getframe().f_code.co_name
+        expected = self.expected_results[test_name]
+        rv, output = self._execute('fulltext remove milestone')
+        self.assertEqual(expected, output)
+
+    def test_remove_unknown_realm(self):
+        test_name = sys._getframe().f_code.co_name
+        expected = self.expected_results[test_name]
+        rv, output = self._execute('fulltext remove unknown_realm')
+        self.assertEqual(expected, output)
+
 
 def suite():
     suite = unittest.TestSuite()

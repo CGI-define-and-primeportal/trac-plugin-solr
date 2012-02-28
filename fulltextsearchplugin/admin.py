@@ -32,6 +32,13 @@ class FullTextSearchAdmin(Component):
                interuppted, it can be resumed later using the `index` command.
                """,
                self._complete_admin_command, self._do_reindex)
+        yield ('fulltext remove', '[realm]',
+               """Remove the search index, or part of it
+               
+               When [realm] is specified, only that realm is removed from the
+               index.
+               """,
+               self._complete_admin_command, self._do_remove)
 
     def _complete_admin_command(self, args):
         fts = FullTextSearch(self.env)
@@ -63,4 +70,9 @@ class FullTextSearchAdmin(Component):
 
     def _do_reindex(self, realm=None):
         self._index(realm, clean=True)
+
+    def _do_remove(self, realm=None):
+        fts = FullTextSearch(self.env)
+        realms = realm and [realm] or fts.realms
+        fts.remove_index(realms)
 
