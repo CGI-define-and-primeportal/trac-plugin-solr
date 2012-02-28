@@ -33,6 +33,7 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
                                    MockSolrInterface)
 
     def tearDown(self):
+        MockSolrInterface._reset()
         self.env.reset_db()
 
     def _execute(self, cmd, strip_trailing_space=True):
