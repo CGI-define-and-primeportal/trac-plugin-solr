@@ -76,6 +76,22 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
                                       "%r != %r\n%s" %
                                       (expected_results, output, output_diff))
 
+    def test_command_suggest(self):
+        """Test suggestions as if the user typed "fulltext <TAB>"
+        """
+        self.assertEqual(
+                sorted(['status', 'info', 'reindex', 'remove', 'index',
+                        'list']),
+                sorted(self._admin.complete_line('', 'fulltext ')))
+
+    def test_realm_suggest(self):
+        """Test suggestions as if the user typed "fulltext index <TAB>"
+        """
+        self.assertEqual(
+                sorted(['attachment', 'milestone', 'ticket', 'versioncontrol',
+                        'wiki']),
+                sorted(self._admin.complete_line('', 'fulltext index ')))
+
     def test_reindex_milestone(self):
         test_name = sys._getframe().f_code.co_name
         expected = self.expected_results[test_name]
