@@ -42,6 +42,7 @@ setup(
     package_data = {'fulltextsearchplugin' : ['htdocs/js/*.js', 'htdocs/css/*.css']}, 
     install_requires = ['Trac>=0.12', 'Genshi>=0.5',
                         'sunburnt', 'lxml', 'httplib2',
+                        'TracTags',
                         ],
     entry_points = {
         'trac.plugins': [
