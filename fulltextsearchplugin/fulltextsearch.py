@@ -20,6 +20,7 @@ from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
 from trac.config import Option
 from trac.util import datefmt
+from trac.util.compat import partial
 from trac.util.datefmt import to_utimestamp, utc
 
 __all__ = ['IFullTextSearchSource',
@@ -163,6 +164,15 @@ class FullTextSearch(Component):
     def realms(self):
         return self._indexers.keys()
 
+    def _reindex(self, realm, resources, index_cb, feedback_cb, finish_cb):
+        i = -1
+        resource = None
+        for i, resource in enumerate(resources):
+            index_cb(resource)
+            feedback_cb(realm, resource)
+        finish_cb(realm, resource)
+        return i + 1
+
     def _reindex_svn(self, realm, feedback, finish_fb):
         """Iterate all changesets and call self.changeset_added on them"""
         # TODO Multiple repository support
@@ -175,22 +185,15 @@ class FullTextSearch(Component):
                 if rev is None:
                     return
                 yield rev
-        i = -1
-        for i, rev in enumerate(all_revs()):
-            changeset = repo.get_changeset(rev)
-            self.changeset_added(repo, changeset)
-            feedback(realm, rev)
-        finish_fb(realm, rev)
-        return i + 1
+        resources = (repo.get_changeset(rev) for rev in all_revs())
+        index = partial(self.changeset_added, repo)
+        return self._reindex(realm, resources, index, feedback, finish_fb)
 
     def _reindex_wiki(self, realm, feedback, finish_fb):
-        i = -1
-        for i, name in enumerate(WikiSystem(self.env).get_pages()):
-            page = WikiPage(self.env, name)
-            self.wiki_page_added(page)
-            feedback(realm, page)
-        finish_fb(realm, page)
-        return i + 1
+        resources = (WikiPage(self.env, name)
+                     for name in WikiSystem(self.env).get_pages())
+        index = self.wiki_page_added
+        return self._reindex(realm, resources, index, feedback, finish_fb)
 
     def _reindex_attachment(self, realm, feedback, finish_fb):
         db = self.env.get_read_db()
@@ -222,34 +225,27 @@ class FullTextSearch(Component):
                 "SELECT type,id,filename,description,size,time,author,ipnr "
                 "FROM attachment"
                 )
-        i = -1
-        for i, row in enumerate(cursor):
+        def att(row):
             parent_realm, parent_id = row[0], row[1]
             attachment = Attachment(self.env, parent_realm, parent_id)
             attachment._from_database(*row[2:])
-            self.attachment_added(attachment)
-            feedback(realm, attachment)
-        finish_fb(realm, attachment)
-        return i + 1
-
+            return attachment
+        resources = (att(row) for row in cursor)
+        index = self.attachment_added
+        return self._reindex(realm, resources, index, feedback, finish_fb)
 
     def _reindex_ticket(self, realm, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT id FROM ticket")
-        i = -1
-        for i, ticket in enumerate(Ticket(tkt_id) for (tkt_id,) in cursor):
-            self.ticket_created(ticket)
-            feedback(realm, ticket)
-        finish_fb(realm, ticket)
-        return i + 1
+        resources = (Ticket(tkt_id) for (tkt_id,) in cursor)
+        index = self.ticket_created
+        return self._reindex(realm, resources, index, feedback, finish_fb)
 
     def _reindex_milestone(self, realm, feedback, finish_fb):
-        i = -1
-        for i, milestone in enumerate(Milestone.select(self.env)):
-            self.milestone_created(milestone)
-            feedback(realm, milestone)
-        return i + 1
+        resources = Milestone.select(self.env)
+        index = self.milestone_created
+        return self._reindex(realm, resources, index, feedback, finish_fb)
 
     def _check_realms(self, realms):
         """Check specfied realms are supported by this component

@@ -61,7 +61,7 @@ class FullTextSearchAdmin(Component):
         #sys.stdout.write('\r\x1b[K %s' % (resource,))
         sys.stdout.flush()
 
-    def _clean_feedback(self):
+    def _clean_feedback(self, realm, resource):
         #sys.stdout.write('\r\x1b[K')
         sys.stdout.flush()
 
