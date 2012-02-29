@@ -279,13 +279,16 @@ class FullTextSearch(Component):
             self.remove_index(realms)
         self.log.info("Started indexing realms: %s",
                       self._fmt_realms(realms))
+        summary = {}
         for realm in realms:
             indexer = self._indexers[realm]
             num_indexed = indexer(realm, feedback, finish_fb)
             self.log.debug('Indexed %i resources in realm: "%s"',
                            num_indexed, realm)
+            summary[realm] = num_indexed
         self.log.info("Completed indexing realms: %s",
                       self._fmt_realms(realms))
+        return summary
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
