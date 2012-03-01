@@ -47,7 +47,7 @@ class FullTextSearchAdmin(Component):
 
     def _index(self, realm, clean):
         fts = FullTextSearch(self.env)
-        realms = [realm] or fts.realms
+        realms = realm and [realm] or fts.realms
         if clean:
             printout(_("Wiping search index and re-indexing all items in "
                        "realms: %(realms)s", realms=fts._fmt_realms(realms)))
