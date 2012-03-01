@@ -562,9 +562,9 @@ class FullTextSearch(Component):
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
         try:
-            si = sunburnt.backend.si_class(self.solr_endpoint)
+            si = self.backend.si_class(self.solr_endpoint)
         except:
-            return #until solr is packaged
+            raise
 
         # Restrict search to chosen realms, if none of our filters were chosen
         # then we won't have any results - return early, empty handed
