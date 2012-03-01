@@ -594,9 +594,8 @@ class FullTextSearch(Component):
         self.log.debug("Facets: %s", result.facet_counts.facet_fields)
         for doc in result.result.docs:
             date = doc.get('changed', None)
-            if date is not None:
-                date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
-                #date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
+            if date:
+                date = self._normalise_date(date)
             (proj,realm,rid) = doc['id'].split('.', 2)
             # try hard to get some 'title' which is needed for clicking on
             title   = doc.get('title', rid)
@@ -625,4 +624,18 @@ class FullTextSearch(Component):
                 return True
         return False
 
+    @staticmethod
+    def _normalise_date(date):
+        """Return a timezone aware datetime.datetime object
+        
+        Sunburnt returns mxDateTime objects in preference to datetime.datetime.
+        Sunburnt also doesn't set the timezone info. Trac expects timezone
+        aware datetime.datetime objects, so sunburnt dates must be normalised.
+        """
+        try:
+            # datetime.datetime
+            return date.replace(tzinfo=datefmt.localtz)
+        except AttributeError:
+            # mxDateTime
+            return date.pydatetime().replace(tzinfo=datefmt.localtz)
 
