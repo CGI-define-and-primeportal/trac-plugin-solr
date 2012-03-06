@@ -156,16 +156,21 @@ class FullTextSearch(Component):
             (u'ticket',     u'Tickets',     True,   self._reindex_ticket),
             (u'wiki',       u'Wiki',        True,   self._reindex_wiki),
             (u'milestone',  u'Milestones',  True,   self._reindex_milestone),
-            (u'changeset',  u'Changesets',  True,   None),
-            (u'versioncontrol', u'File archive', True,  self._reindex_svn),
+            (u'changeset',  u'Changesets',  True,   self._reindex_changeset),
+            (u'source',     u'File archive', True,  None),
             (u'attachment', u'Attachments', True,   self._reindex_attachment),
             ]
         self._indexers = dict((name, indexer) for name, label, enabled, indexer
                                               in self._realms if indexer)
 
     @property
-    def realms(self):
-        return self._indexers.keys()
+    def search_realms(self):
+        return [name for name, label, enabled, indexer in self._realms]
+
+    @property
+    def index_realms(self):
+        return [name for name, label, enabled, indexer in self._realms
+                     if indexer]
 
     def _reindex(self, realm, resources, index_cb, feedback_cb, finish_cb):
         """Iterate through `resources` to index `realm`, return index count
@@ -185,7 +190,7 @@ class FullTextSearch(Component):
         finish_cb(realm, resource)
         return i + 1
 
-    def _reindex_svn(self, realm, feedback, finish_fb):
+    def _reindex_changeset(self, realm, feedback, finish_fb):
         """Iterate all changesets and call self.changeset_added on them"""
         # TODO Multiple repository support
         repo = self.env.get_repository()
@@ -265,8 +270,8 @@ class FullTextSearch(Component):
         Raise exception if unsupported realms are found.
         """
         if realms is None:
-            realms = self.realms
-        unsupported_realms = set(realms).difference(set(self.realms))
+            realms = self.index_realms
+        unsupported_realms = set(realms).difference(set(self.index_realms))
         if unsupported_realms:
             raise TracError(_("These realms are not supported by "
                               "FullTextSearch: %(realms)s",
@@ -491,8 +496,7 @@ class FullTextSearch(Component):
 
     def _fill_so(self, changeset, node):
         so = FullTextSearchObject(
-                self.project,
-                realm = u'versioncontrol', id=node.path,
+                self.project, node.resource,
                 title = node.path,
                 oneline = u'[%s]: %s' % (changeset.rev, shorten_result(changeset.message)),
                 comments = [changeset.message],
@@ -507,8 +511,20 @@ class FullTextSearch(Component):
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
-        # FIXME: This should really create an index of both changesets and
-        # files (two realms; source and changeset)
+        #Index the commit message
+        so = FullTextSearchObject(
+                self.project, changeset.resource,
+                title=u'[%s]: %s' % (changeset.rev,
+                                       shorten_line(changeset.message)),
+                oneline=shorten_result(changeset.message),
+                body=changeset.message,
+                author=changeset.author,
+                created=changeset.date,
+                changed=changeset.date,
+                )
+        self.backend.create(so)
+
+        # Index the file contents of the repository
         sos = []
         for path, kind, change, base_path, base_rev in changeset.get_changes():
             #FIXME handle kind == Node.DIRECTORY
@@ -518,7 +534,7 @@ class FullTextSearch(Component):
                 sos.append(so)
             elif change == Changeset.MOVE:
                 so = FullTextSearchObject(
-                        self.project, realm=u'versioncontrol', id=base_path,
+                        self.project, realm=node.resource.realm, id=base_path,
                         action='DELETE')
                 sos.append(so)
                 so = self._fill_so(changeset,
@@ -526,7 +542,7 @@ class FullTextSearch(Component):
                 sos.append(so)
             elif change == Changeset.DELETE:
                 so = FullTextSearchObject(
-                        self.project, realm=u'versioncontrol', id=path,
+                        self.project, realm=node.resource.realm, id=path,
                         action='DELETE')
                 sos.append(so)
         for so in sos:
@@ -556,7 +572,7 @@ class FullTextSearch(Component):
         The filter is of the form realm:realm1 OR realm:realm2 OR ...
         """
         Q = si.query().Q
-        my_filters = [f for f in filters if f in self.realms]
+        my_filters = [f for f in filters if f in self.search_realms]
         def rec(list1):
             if len(list1) > 2:
                 return Q(realm=list1.pop()) | rec(list1)

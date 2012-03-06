@@ -93,7 +93,7 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
         """Test suggestions as if the user typed "fulltext index <TAB>"
         """
         self.assertEqual(
-                sorted(['attachment', 'milestone', 'ticket', 'versioncontrol',
+                sorted(['attachment', 'changeset', 'milestone', 'ticket',
                         'wiki']),
                 sorted(self._admin.complete_line('', 'fulltext index ')))
 

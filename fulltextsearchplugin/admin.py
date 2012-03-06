@@ -43,11 +43,11 @@ class FullTextSearchAdmin(Component):
     def _complete_admin_command(self, args):
         fts = FullTextSearch(self.env)
         if len(args) == 1:
-            return PrefixList(fts.realms)
+            return PrefixList(fts.index_realms)
 
     def _index(self, realm, clean):
         fts = FullTextSearch(self.env)
-        realms = realm and [realm] or fts.realms
+        realms = realm and [realm] or fts.index_realms
         if clean:
             printout(_("Wiping search index and re-indexing all items in "
                        "realms: %(realms)s", realms=fts._fmt_realms(realms)))
@@ -73,6 +73,6 @@ class FullTextSearchAdmin(Component):
 
     def _do_remove(self, realm=None):
         fts = FullTextSearch(self.env)
-        realms = realm and [realm] or fts.realms
+        realms = realm and [realm] or fts.index_realms
         fts.remove_index(realms)
 

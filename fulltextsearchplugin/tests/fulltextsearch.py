@@ -395,9 +395,9 @@ class ChangesetsSvnTestCase(unittest.TestCase):
         self.repos.close()
         self.repos = None
 
-    def _get_so(self):
+    def _get_so(self, i=-1):
         si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
-        return si.hist[-1][2]
+        return si.hist[i][2]
 
     def _feedback(self, realm, resource):
         pass
@@ -405,22 +405,29 @@ class ChangesetsSvnTestCase(unittest.TestCase):
     def _finish_fb(self, realm, resource):
         pass
 
-    def test_reindex_svn(self):
-        self.assertEquals(self.repos.youngest_rev,
-                          self.fts._reindex_svn('versionconrol',
-                                                self._feedback,
-                                                self._finish_fb))
+    def test_reindex_changeset(self):
+        self.assertEquals({'changeset': self.repos.youngest_rev},
+                          self.fts.index(['changeset'], True,
+                                         self._feedback, self._finish_fb))
     
     def test_add_changeset(self):
         sw = SubversionWriter(self.env, self.repos, 'kalle')
         new_rev = sw.put_content('/trunk/foo.txt', content='Foo Bar', commit_msg='A comment')
         RepositoryManager(self.env).notify('changeset_added', '', [new_rev])
+        # Node
         so = self._get_so()
-        self.assertEquals(so.body.read(), 'Foo Bar')
+        self.assertEquals('trac.source.trunk/foo.txt', so.id)
+        self.assertEquals('trunk/foo.txt', so.title)
+        self.assertEquals('kalle', so.author)
+        self.assertEquals('Foo Bar', so.body.read())
         self.assertTrue('A comment' in so.comments)
-        self.assertTrue('foo.txt' in so.id)
-        self.assertTrue(str(self.repos.youngest_rev) in so.oneline)
-        self.assertTrue('kalle' in so.author)
+        # Changeset
+        so = self._get_so(-2)
+        self.assertEquals('trac.changeset.%i' % new_rev, so.id)
+        self.assertTrue(so.title.startswith('[%i]: A comment' % new_rev))
+        self.assertEquals('kalle', so.author)
+        self.assertEquals('A comment', so.body)
+
 
 
 def suite():
