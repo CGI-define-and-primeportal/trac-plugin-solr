@@ -5,6 +5,7 @@ import re
 import sunburnt
 import types
 
+from trac.env import IEnvironmentSetupParticipant
 from trac.core import Component, implements, Interface, TracError
 from trac.ticket.api import (ITicketChangeListener, IMilestoneChangeListener,
                              TicketSystem)
@@ -141,7 +142,7 @@ class FullTextSearch(Component):
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
                IRepositoryChangeListener, ISearchSource,
-               IRequireComponents)
+               IEnvironmentSetupParticipant, IRequireComponents)
 
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8983/solr/",
@@ -296,6 +297,7 @@ class FullTextSearch(Component):
     def requires(self):
         return [TagModelProvider]
 
+    # IEnvironmentSetupParticipant methods
     def environment_created(self):
         self.env.with_transaction()
         def do_upgrade(db):
