@@ -168,6 +168,15 @@ class FullTextSearch(Component):
         return self._indexers.keys()
 
     def _reindex(self, realm, resources, index_cb, feedback_cb, finish_cb):
+        """Iterate through `resources` to index `realm`, return index count
+        
+        realm       Trac realm to which items in resources belong
+        resources   Iterable of Trac resources e.g. WikiPage, Attachment
+        index_cb    Callable that accepts a resource argument
+        feedback_cb Callable that accepts a realm & resource argument
+        finish_cb   Callable that accepts a realm & resource argument. The
+                    resource will be None if `resources` is empty
+        """
         i = -1
         resource = None
         for i, resource in enumerate(resources):
