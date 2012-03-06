@@ -43,6 +43,7 @@ setup(
     install_requires = ['Trac>=0.12', 'Genshi>=0.5',
                         'sunburnt', 'lxml', 'httplib2',
                         'TracTags',
+                        'ComponentDependencyPlugin',
                         ],
     entry_points = {
         'trac.plugins': [
