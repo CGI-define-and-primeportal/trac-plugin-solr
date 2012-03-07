@@ -15,7 +15,8 @@ from trac.wiki.model import WikiPage
 from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener, Attachment
 from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
-from trac.resource import get_resource_shortname
+from trac.resource import (get_resource_shortname, get_resource_url,
+                           Resource)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
 from trac.config import Option
@@ -40,23 +41,19 @@ class FullTextSearchModule(Component):
     pass
 
 class FullTextSearchObject(object):
-    def __init__(self, project, resource=None, realm=None, id=None,
+    def __init__(self, project, realm, id=None,
                  parent_realm=None, parent_id=None,
                  title=None, author=None, changed=None, created=None,
                  oneline=None, tags=None, involved=None,
                  popularity=None, body=None, comments=None, action=None):
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
-        if resource and realm is None:
-            realm = resource.realm
-            id = resource.id
         self.project = project
-        self.realm = realm
-        if parent_realm and parent_id:
-            self.id = u"%s.%s:%s:%s.%s" % (project, realm, parent_realm,
-                                           parent_id, id)
+        if isinstance(realm, Resource):
+            self.resource = realm
         else:
-            self.id = u"%s.%s.%s" % (project, realm, id)
+            parent = parent_realm and Resource(parent_realm, parent_id)
+            self.resource = Resource(realm, id, parent=parent)
 
         self.title = title
         self.author = author
@@ -69,6 +66,38 @@ class FullTextSearchObject(object):
         self.body = body
         self.comments = comments
         self.action = action
+
+    def _get_realm(self):
+        return self.resource.realm
+    def _set_realm(self, val):
+        self.resource.realm = val
+    realm = property(_get_realm, _set_realm)
+
+    def _get_id(self):
+        return self.resource.id
+    def _set_id(self, val):
+        self.resource.id = val
+    id = property(_get_id, _set_id)
+
+    @property
+    def parent_realm(self):
+        if self.resource.parent:
+            return self.resource.parent.realm
+
+    @property
+    def parent_id(self):
+        if self.resource.parent:
+            return self.resource.parent.id
+
+    @property
+    def doc_id(self):
+        if self.parent_realm and self.parent_id:
+            return u"%s:%s:%s:%s:%s" % (self.project, self.realm,
+                                        self.parent_realm, self.parent_id,
+                                        self.id)
+        else:
+            return u"%s:%s:%s" % (self.project, self.realm, self.id)
+
     def __repr__(self):
         from pprint import pformat
         r = '<FullTextSearchObject %s>' % pformat(self.__dict__)
@@ -112,7 +141,7 @@ class Backend(Queue):
         s = self.si_class(self.solr_endpoint)
         realms = realms or []
         # I would have like some more info back
-        s.delete(queries=[u"id:%s.*" % project_id] +
+        s.delete(queries=[u"project:%s" % project_id] +
                          [u"realm:%s" % realm for realm in realms])
         s.commit()
 
@@ -408,8 +437,7 @@ class FullTextSearch(Component):
         pass
 
     def wiki_page_renamed(self, page, old_name): 
-        so = FullTextSearchObject(self.project, page.resource)
-        so.id = so.id.replace(page.name, old_name) #FIXME, can mess up
+        so = FullTextSearchObject(self.project, page.resource.realm, old_name)
         self.backend.delete(so)
         self.wiki_page.added(page)
 
@@ -455,10 +483,6 @@ class FullTextSearch(Component):
             comments = [attachment.description]
         so = FullTextSearchObject(
                 self.project, attachment.resource,
-                realm = attachment.resource.realm,
-                parent_realm = attachment.parent_realm,
-                parent_id = attachment.parent_id,
-                id = attachment.resource.id,
                 title = attachment.title,
                 author = attachment.author,
                 changed = attachment.date,
@@ -546,13 +570,13 @@ class FullTextSearch(Component):
                 sos.append(self._fill_so(changeset, node))
             elif change == Changeset.MOVE:
                 sos.append(FullTextSearchObject(self.project,
-                                                realm=node.resource.realm,
-                                                id=base_path, action='DELETE'))
+                                                node.resource.realm, base_path,
+                                                action='DELETE'))
                 sos.append(self._fill_so(changeset, node))
             elif change == Changeset.DELETE:
                 sos.append(FullTextSearchObject(self.project,
-                                                realm=node.resource.realm,
-                                                id=path, action='DELETE'))
+                                                node.resource.realm, path,
+                                                action='DELETE'))
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
         self.backend.add(sos)
@@ -631,22 +655,13 @@ class FullTextSearch(Component):
             date = doc.get('changed', None)
             if date:
                 date = self._normalise_date(date)
-            (proj,realm,rid) = doc['id'].split('.', 2)
-            # try hard to get some 'title' which is needed for clicking on
-            title   = doc.get('title', rid)
-            if realm == 'versioncontrol':
-                href = req.href('browser', rid)
-            elif 'attachment:' in realm:    #FIXME hacky stuff here
-                href = req.href(realm.replace(':','/'), rid)
-                # FIXME is there a better way to do this?
-                if realm.split(":")[1] == "wiki":
-                    title = _(u"%(filename)s (attached to page %(wiki_page)s)",
-                              filename=rid, wiki_page=realm.split(":")[2])
-                if realm.split(":")[1] == "ticket":
-                    title = _(u"%(filename)s (attached to ticket #%(ticket)s)",
-                              filename=rid, ticket=realm.split(":")[2])
-            else:
-                href = req.href(realm, rid)
+            resource = FullTextSearchObject(self.project,
+                                            doc['realm'], doc['id'],
+                                            doc.get('parent_realm'),
+                                            doc.get('parent_id')).resource
+            href = get_resource_url(self.env, resource, req.href)
+            title = doc.get('title',
+                            get_resource_shortname(self.env, resource))
             author  = doc.get('author','')
             if isinstance(author,types.ListType):
                 author = ", ".join(author)
