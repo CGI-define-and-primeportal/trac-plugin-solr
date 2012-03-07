@@ -86,6 +86,9 @@ class MockSolrInterface(object):
         cls.docs = {}
         cls.hist = []
 
+    def optimize(self):
+        pass
+
 
 class BackendTestCase(unittest.TestCase):
     def setUp(self):
