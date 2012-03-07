@@ -86,7 +86,7 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
         """
         self.assertEqual(
                 sorted(['status', 'info', 'reindex', 'remove', 'index',
-                        'list']),
+                        'list', 'optimize']),
                 sorted(self._admin.complete_line('', 'fulltext ')))
 
     def test_realm_suggest(self):
@@ -96,6 +96,12 @@ class FullTextSearchAdminTestCase(unittest.TestCase):
                 sorted(['attachment', 'changeset', 'milestone', 'ticket',
                         'wiki']),
                 sorted(self._admin.complete_line('', 'fulltext index ')))
+
+    def test_optimize(self)
+        test_name = sys._getframe().f_code.co_name
+        expected = self.expected_results[test_name]
+        rv, output = self._execute('fulltext optimize')
+        self.assertEqual(expected, output)
 
     def test_reindex_milestone(self):
         test_name = sys._getframe().f_code.co_name

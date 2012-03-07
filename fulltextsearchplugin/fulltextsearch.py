@@ -135,6 +135,14 @@ class Backend(Queue):
                 self.log.error('%s %r', item, item)
                 raise
 
+    def optimize(self):
+        s = self.si_class(self.solr_endpoint)
+        try:
+            s.optimize()
+        except Exception:
+            self.log.error('%s %r', item, item)
+            raise
+
 
 class FullTextSearch(Component):
     """Search all ChangeListeners and prepare the output for a full text 
@@ -306,6 +314,11 @@ class FullTextSearch(Component):
         self.log.info("Completed indexing realms: %s",
                       self._fmt_realms(realms))
         return summary
+
+    def optimize(self):
+        self.log.info("Started optimizing index")
+        self.backend.optimize()
+        self.log.info("Completed optimizing")
 
     # IRequireComponents methods
     def requires(self):

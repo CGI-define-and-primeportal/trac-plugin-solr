@@ -23,6 +23,16 @@ class FullTextSearchAdmin(Component):
                that have been added or updated.
                """,
                self._complete_admin_command, self._do_index)
+        yield ('fulltext optimize', '',
+               """Optimize the search index by merging segments and removing
+               stale documents
+               
+               Optimizing should be performed infrequently (e.g. nightly), if
+               at all, since it is very expensive and involves reading and
+               re-writing the entire index. NB: if multiple projects share
+               an index this will operation will affect all of them.
+               """,
+               None, self._do_optimize)
         yield ('fulltext reindex', '[realm]',
                """Re-index all Trac resources.
                
@@ -67,6 +77,10 @@ class FullTextSearchAdmin(Component):
 
     def _do_index(self, realm=None):
         self._index(realm, clean=False)
+
+    def _do_optimize(self):
+        fts = FullTextSearch(self.env)
+        fts.optimize()
 
     def _do_reindex(self, realm=None):
         self._index(realm, clean=True)
