@@ -39,7 +39,7 @@ class FullTextSearchAdmin(Component):
                When [realm] is specified, only that realm is re-indexed.
                Discards the search index and recreates it. Note that this
                operation can take a long time to complete. If indexing gets
-               interuppted, it can be resumed later using the `index` command.
+               interrupted, it can be resumed later using the `index` command.
                """,
                self._complete_admin_command, self._do_reindex)
         yield ('fulltext remove', '[realm]',
