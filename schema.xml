@@ -400,14 +400,17 @@
 
 
  <fields>
-   <field name="id" type="string" indexed="true" stored="true" required="true"/>
+   <field name="doc_id" type="string" indexed="true" stored="true" required="true"/>
    <field name="project" type="string" indexed="true" stored="true" required="true"/>
+   <field name="realm" type="string" indexed="true" stored="true" required="true"/>
+   <field name="id" type="string" indexed="true" stored="true" required="true"/>
+   <field name="parent_realm" type="string" indexed="true" stored="true"/>
+   <field name="parent_id" type="string" indexed="true" stored="true"/>
    <field name="title" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="author" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="changed" type="date" indexed="true" stored="true"/>
    <field name="created" type="date" indexed="true" stored="true"/>
    <field name="oneline" type="text_rev" indexed="true" stored="true"/>
-   <field name="realm" type="string" indexed="true" stored="true"/>
    <field name="tags" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="involved" type="text" indexed="true" stored="true" multiValued="true"/>
    <field name="popularity" type="int" indexed="true" stored="true" />
@@ -417,7 +420,7 @@
    <field name="timestamp" type="date" indexed="true" stored="true" default="NOW"/>
    <dynamicField name="ignored_*" type="ignored"/>
  </fields>
- <uniqueKey>id</uniqueKey>
+ <uniqueKey>doc_id</uniqueKey>
 
  <!-- field for the QueryParser to use when an explicit fieldname is absent -->
  <defaultSearchField>body_rev</defaultSearchField>
