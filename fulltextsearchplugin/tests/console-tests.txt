@@ -1,3 +1,4 @@
+===== test_optimize =====
 ===== test_reindex_milestone =====
 Wiping search index and re-indexing all items in realms: milestone
 Indexing finished
