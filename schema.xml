@@ -400,24 +400,24 @@
 
 
  <fields>
-   <field name="doc_id" type="string" indexed="true" stored="true" required="true"/>
-   <field name="project" type="string" indexed="true" stored="true" required="true"/>
-   <field name="realm" type="string" indexed="true" stored="true" required="true"/>
-   <field name="id" type="string" indexed="true" stored="true" required="true"/>
+   <field name="doc_id"     type="string"   indexed="true" stored="true" required="true"/>
+   <field name="project"    type="string"   indexed="true" stored="true" required="true"/>
+   <field name="realm"      type="string"   indexed="true" stored="true" required="true"/>
+   <field name="id"         type="string"   indexed="true" stored="true" required="true"/>
    <field name="parent_realm" type="string" indexed="true" stored="true"/>
-   <field name="parent_id" type="string" indexed="true" stored="true"/>
-   <field name="title" type="text" indexed="true" stored="true" multiValued="true"/>
-   <field name="author" type="text" indexed="true" stored="true" multiValued="true"/>
-   <field name="changed" type="date" indexed="true" stored="true"/>
-   <field name="created" type="date" indexed="true" stored="true"/>
-   <field name="oneline" type="text_rev" indexed="true" stored="true"/>
-   <field name="tags" type="text" indexed="true" stored="true" multiValued="true"/>
-   <field name="involved" type="text" indexed="true" stored="true" multiValued="true"/>
-   <field name="popularity" type="int" indexed="true" stored="true" />
-   <field name="body" type="text" indexed="true" stored="false"/>
-   <field name="body_rev" type="text_rev" indexed="true" stored="false" multiValued="true"/>
-   <field name="comments" type="text" indexed="true" stored="true" multiValued="true"/>
-   <field name="timestamp" type="date" indexed="true" stored="true" default="NOW"/>
+   <field name="parent_id"  type="string"   indexed="true" stored="true"/>
+   <field name="title"      type="text"     indexed="true" stored="true" multiValued="true"/>
+   <field name="author"     type="text"     indexed="true" stored="true" multiValued="true"/>
+   <field name="changed"    type="date"     indexed="true" stored="true"/>
+   <field name="created"    type="date"     indexed="true" stored="true"/>
+   <field name="oneline"    type="text_rev" indexed="true" stored="true"/>
+   <field name="tags"       type="text"     indexed="true" stored="true" multiValued="true"/>
+   <field name="involved"   type="text"     indexed="true" stored="true" multiValued="true"/>
+   <field name="popularity" type="int"      indexed="true" stored="true"/>
+   <field name="body"       type="text"     indexed="true" stored="false"/>
+   <field name="body_rev"   type="text_rev" indexed="true" stored="false" multiValued="true"/>
+   <field name="comments"   type="text"     indexed="true" stored="true" multiValued="true"/>
+   <field name="timestamp"  type="date"     indexed="true" stored="true" default="NOW"/>
    <dynamicField name="ignored_*" type="ignored"/>
  </fields>
  <uniqueKey>doc_id</uniqueKey>
