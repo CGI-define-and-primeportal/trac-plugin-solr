@@ -3,7 +3,7 @@ import sys
 from trac.admin import AdminCommandError, IAdminCommandProvider, PrefixList
 from trac.core import Component, implements
 from trac.util.translation import _
-from trac.util.text import printout
+from trac.util.text import printout, print_table
 
 from fulltextsearchplugin.fulltextsearch import FullTextSearch
 
@@ -23,6 +23,12 @@ class FullTextSearchAdmin(Component):
                that have been added or updated.
                """,
                self._complete_admin_command, self._do_index)
+        yield ('fulltext list', '[realm]',
+               """List Trac resources that are indexed.
+               
+               When [realm] is specified, only that realm is listed.
+               """,
+               self._complete_search_command, self._do_list)
         yield ('fulltext optimize', '',
                """Optimize the search index by merging segments and removing
                stale documents
@@ -55,6 +61,11 @@ class FullTextSearchAdmin(Component):
         if len(args) == 1:
             return PrefixList(fts.index_realms)
 
+    def _complete_search_command(self, args):
+        fts = FullTextSearch(self.env)
+        if len(args) == 1:
+            return PrefixList(fts.search_realms)
+
     def _index(self, realm, clean):
         fts = FullTextSearch(self.env)
         realms = realm and [realm] or fts.index_realms
@@ -77,6 +88,15 @@ class FullTextSearchAdmin(Component):
 
     def _do_index(self, realm=None):
         self._index(realm, clean=False)
+
+    def _do_list(self, realm=None):
+        fts = FullTextSearch(self.env)
+        realms = realm and [realm] or fts.index_realms
+        fields = ['realm', 'id']
+        query, response = fts._do_search('*', realms, sort_by=fields,
+                                         field_limit=fields)
+        rows = ((doc['realm'], doc['id']) for doc in fts._docs(query))
+        print_table(rows, (_("Realm"), _("Id")))
 
     def _do_optimize(self):
         fts = FullTextSearch(self.env)
