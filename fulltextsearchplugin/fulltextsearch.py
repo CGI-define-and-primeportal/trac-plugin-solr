@@ -602,8 +602,8 @@ class FullTextSearch(Component):
 
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
-        result = self._do_search(terms, filters)
-        docs = (FullTextSearchObject(**doc) for doc in result.result.docs)
+        query, response = self._do_search(terms, filters)
+        docs = (FullTextSearchObject(**doc) for doc in self._docs(query))
         for doc in docs:
             changed = doc.changed
             href = get_resource_url(self.env, doc.resource, req.href)
@@ -633,7 +633,7 @@ class FullTextSearch(Component):
                 return ""
         return rec(my_filters[:])
 
-    def _do_search(self, terms, filters):
+    def _do_search(self, terms, filters, facet='realm'):
         try:
             si = self.backend.si_class(self.solr_endpoint)
         except:
@@ -649,26 +649,29 @@ class FullTextSearch(Component):
         # The index can store multiple projects, restrict results to this one
         filter_q &= si.query().Q(project=self.project)
 
-        if self._has_wildcard(terms):
-            self.log.debug("Found wildcard query, switching to standard parser")
-            result = si.query(terms).filter(filter_q).facet_by('realm').execute()
-        else:
-            opts = {
-                # Search for terms (q) using dismax query type (qt).
-                # No query fields (qf) are specified so search in default
-                # fields, with default weightings
-                'q': terms, 'qt': "dismax",
-                # As well as the results, return num of results in each realm
-                'facet': True, 'facet.field': "realm",
-                # Filter query results by realm and project
-                'fq': filter_q,
-                }
-            result = si.search(**opts)
-        self.log.debug("Facets: %s", result.facet_counts.facet_fields)
-        return result
+        # Construct a query that searches for terms in docs that match chosen
+        # realms and current project
+        query = si.query(terms).filter(filter_q)
 
-    def _has_wildcard(self, terms):
-        for term in terms:
-            if '*' in term:
-                return True
-        return False
+        if facet:
+            query = query.facet_by(facet)
+
+        # Submit the query to Solr, response contains the first 10 results
+        response = query.execute()
+        if facet:
+            self.log.debug("Facets: %s", response.facet_counts.facet_fields)
+
+        return query, response
+
+    def _docs(self, query, page_size=10):
+        """Return a generator of all the docs in query.
+        """
+        i = 0
+        while True:
+            response = query.paginate(start=i, rows=page_size).execute()
+            self.log.debug('Response: %r', response)
+            for doc in response:
+                yield doc
+            if len(response) < page_size:
+                break
+            i += page_size
