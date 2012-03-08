@@ -1,12 +1,13 @@
 import unittest
 
 import fulltextsearchplugin
-from fulltextsearchplugin.tests import fulltextsearch, admin
+from fulltextsearchplugin.tests import fulltextsearch, admin, dates
 
 def suite():
     suite = unittest.TestSuite()
     suite.addTest(fulltextsearch.suite())
     suite.addTest(admin.suite())
+    suite.addTest(dates.suite())
     return suite
 
 if __name__ == '__main__':

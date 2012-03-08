@@ -164,7 +164,8 @@ class FullTextSearchObjectTestCase(unittest.TestCase):
     def test_create_props(self):
         so = FullTextSearchObject(self.project, 'wiki',
                                   title='title', author='author',
-                                  changed='changed', created='created',
+                                  created=datetime(2001, 1, 1, tzinfo=utc),
+                                  changed=datetime(2010, 1, 1, tzinfo=utc),
                                   oneline='oneline',tags='tags',
                                   involved='involved', popularity='popularity',
                                   body='body', action='action',
@@ -172,8 +173,8 @@ class FullTextSearchObjectTestCase(unittest.TestCase):
         self.assertEquals('project1', so.project)
         self.assertEquals('title', so.title)
         self.assertEquals('author', so.author)
-        self.assertEquals('changed', so.changed)
-        self.assertEquals('created', so.created)
+        self.assertEquals(datetime(2001, 1, 1, tzinfo=utc), so.created)
+        self.assertEquals(datetime(2010, 1, 1, tzinfo=utc), so.changed)
         self.assertEquals('oneline', so.oneline)
         self.assertEquals('tags', so.tags)
         self.assertEquals('involved', so.involved)

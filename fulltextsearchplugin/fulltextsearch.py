@@ -27,6 +27,8 @@ from trac.util.datefmt import to_utimestamp, utc
 from componentdependencies import IRequireComponents
 from tractags.model import TagModelProvider
 
+from fulltextsearchplugin.dates import normalise_datetime
+
 __all__ = ['IFullTextSearchSource',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
            ]
@@ -45,7 +47,8 @@ class FullTextSearchObject(object):
                  parent_realm=None, parent_id=None,
                  title=None, author=None, changed=None, created=None,
                  oneline=None, tags=None, involved=None,
-                 popularity=None, body=None, comments=None, action=None):
+                 popularity=None, body=None, comments=None, action=None,
+                 **kwarg):
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
         self.project = project
@@ -57,8 +60,8 @@ class FullTextSearchObject(object):
 
         self.title = title
         self.author = author
-        self.changed = changed
-        self.created = created
+        self.changed = normalise_datetime(changed)
+        self.created = normalise_datetime(created)
         self.oneline = oneline
         self.tags = tags
         self.involved = involved
@@ -597,6 +600,18 @@ class FullTextSearch(Component):
         return [(name, label, enabled) for name, label, enabled, indexer 
                                        in self._realms]
 
+    def get_search_results(self, req, terms, filters):
+        self.log.debug("get_search_result called")
+        result = self._do_search(terms, filters)
+        docs = (FullTextSearchObject(**doc) for doc in result.result.docs)
+        for doc in docs:
+            changed = doc.changed
+            href = get_resource_url(self.env, doc.resource, req.href)
+            title = doc.title or get_resource_shortname(self.env, doc.resource)
+            author = ", ".join(doc.author or [])
+            excerpt = doc.oneline or ''
+            yield (href, title, changed, author, excerpt)
+
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
         (realms).
@@ -618,8 +633,7 @@ class FullTextSearch(Component):
                 return ""
         return rec(my_filters[:])
 
-    def get_search_results(self, req, terms, filters):
-        self.log.debug("get_search_result called")
+    def _do_search(self, terms, filters):
         try:
             si = self.backend.si_class(self.solr_endpoint)
         except:
@@ -651,41 +665,10 @@ class FullTextSearch(Component):
                 }
             result = si.search(**opts)
         self.log.debug("Facets: %s", result.facet_counts.facet_fields)
-        for doc in result.result.docs:
-            date = doc.get('changed', None)
-            if date:
-                date = self._normalise_date(date)
-            resource = FullTextSearchObject(self.project,
-                                            doc['realm'], doc['id'],
-                                            doc.get('parent_realm'),
-                                            doc.get('parent_id')).resource
-            href = get_resource_url(self.env, resource, req.href)
-            title = doc.get('title',
-                            get_resource_shortname(self.env, resource))
-            author  = doc.get('author','')
-            if isinstance(author,types.ListType):
-                author = ", ".join(author)
-            excerpt = doc.get('oneline','')
-            yield (href, title, date, author, excerpt)
+        return result
 
     def _has_wildcard(self, terms):
         for term in terms:
             if '*' in term:
                 return True
         return False
-
-    @staticmethod
-    def _normalise_date(date):
-        """Return a timezone aware datetime.datetime object
-        
-        Sunburnt returns mxDateTime objects in preference to datetime.datetime.
-        Sunburnt also doesn't set the timezone info. Trac expects timezone
-        aware datetime.datetime objects, so sunburnt dates must be normalised.
-        """
-        try:
-            # datetime.datetime
-            return date.replace(tzinfo=datefmt.localtz)
-        except AttributeError:
-            # mxDateTime
-            return date.pydatetime().replace(tzinfo=datefmt.localtz)
-
