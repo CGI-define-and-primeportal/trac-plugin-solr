@@ -28,8 +28,9 @@ class MockSolrInterface(object):
     
     Submitted documents are stored as a class attribute, so all instances share
     the submitted documents. No transaction isolation. No schema enforcement.
-    No document extraction. No indexing. Only AND equality searches,
-    with search strings of the form `field:value` are implemented by .query().
+    No document extraction. No indexing. Only AND equality searches and '*' 
+    wildcard searches are implemented by .query(). `queries` parameter must be
+    either a str or list of str, of the form 'field:value' or '*'.
     
     To aid testing a history of add/delete operations is maintained.
     """
@@ -71,7 +72,8 @@ class MockSolrInterface(object):
             queries = [queries]
         field_vals = [q.split(':', 1) for q in queries or []]
         return [doc for doc in self.docs.itervalues()
-                    if all(getattr(doc, f, None) == v for f, v in field_vals)]
+                    if all((f[0] == '*' or getattr(doc, f[0], None) == f[1])
+                           for f in field_vals)]
 
     def commit(self):
         for op, docid, doc in self.pending:
