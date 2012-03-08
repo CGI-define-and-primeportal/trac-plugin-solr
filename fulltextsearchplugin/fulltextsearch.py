@@ -398,7 +398,7 @@ class FullTextSearch(Component):
         self.backend.create(so)
         self.log.debug("Ticket added for indexing: %s", ticket)
         
-    def ticket_changed(self, ticket, comment, author, old_values, action=None):
+    def ticket_changed(self, ticket, comment, author, old_values):
         self.ticket_created(ticket)
 
     def ticket_deleted(self, ticket):
