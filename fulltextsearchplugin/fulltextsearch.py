@@ -633,7 +633,8 @@ class FullTextSearch(Component):
                 return ""
         return rec(my_filters[:])
 
-    def _do_search(self, terms, filters, facet='realm'):
+    def _do_search(self, terms, filters, facet='realm', sort_by=None,
+                                         field_limit=None):
         try:
             si = self.backend.si_class(self.solr_endpoint)
         except:
@@ -655,6 +656,10 @@ class FullTextSearch(Component):
 
         if facet:
             query = query.facet_by(facet)
+        for field in sort_by or []:
+            query = query.sort_by(field)
+        if field_limit:
+            query = query.field_limit(field_limit)
 
         # Submit the query to Solr, response contains the first 10 results
         response = query.execute()
