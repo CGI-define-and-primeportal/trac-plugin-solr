@@ -21,7 +21,7 @@ from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
 from trac.config import Option
 from trac.util.compat import partial
-from trac.util.datefmt import to_utimestamp, utc
+from trac.util.datefmt import to_datetime, to_utimestamp, utc
 
 from componentdependencies import IRequireComponents
 from tractags.model import TagModelProvider
@@ -234,7 +234,7 @@ class FullTextSearch(Component):
         finish_cb(realm, resource)
         return i + 1
 
-    def _reindex_changeset(self, realm, feedback, finish_fb):
+    def _reindex_changeset(self, realm, status, feedback, finish_fb):
         """Iterate all changesets and call self.changeset_added on them"""
         # TODO Multiple repository support
         repo = self.env.get_repository()
@@ -246,17 +246,26 @@ class FullTextSearch(Component):
                 if rev is None:
                     return
                 yield rev
-        resources = (repo.get_changeset(rev) for rev in all_revs())
+        def changesets():
+            for rev in all_revs():
+                changeset = repo.get_changeset(rev)
+                if changeset.date > to_datetime(status):
+                    yield changeset
+        resources = changesets()
         index = partial(self.changeset_added, repo)
         return self._reindex(realm, resources, index, feedback, finish_fb)
 
-    def _reindex_wiki(self, realm, feedback, finish_fb):
-        resources = (WikiPage(self.env, name)
-                     for name in WikiSystem(self.env).get_pages())
+    def _reindex_wiki(self, realm, status, feedback, finish_fb):
+        def wikipages():
+            for name in WikiSystem(self.env).get_pages():
+                page = WikiPage(self.env, name)
+                if page.time > to_datetime(status):
+                    yield page
+        resources = wikipages()
         index = self.wiki_page_added
         return self._reindex(realm, resources, index, feedback, finish_fb)
 
-    def _reindex_attachment(self, realm, feedback, finish_fb):
+    def _reindex_attachment(self, realm, status, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         # This plugin was originally written for #define 4, a Trac derivative
@@ -280,12 +289,16 @@ class FullTextSearch(Component):
                       GROUP BY c_type, c_id, c_filename) AS current
                      ON type = c_type AND id = c_id
                         AND filename = c_filename AND version = c_version
-                ORDER BY time""")
+                WHERE time > %s
+                ORDER BY time""",
+                (status,))
         else:
             cursor.execute(
                 "SELECT type,id,filename,description,size,time,author,ipnr "
-                "FROM attachment"
-                )
+                "FROM attachment "
+                "WHERE time > %s "
+                "ORDER by time",
+                (status,))
         def att(row):
             parent_realm, parent_id = row[0], row[1]
             attachment = Attachment(self.env, parent_realm, parent_id)
@@ -295,15 +308,20 @@ class FullTextSearch(Component):
         index = self.attachment_added
         return self._reindex(realm, resources, index, feedback, finish_fb)
 
-    def _reindex_ticket(self, realm, feedback, finish_fb):
+    def _reindex_ticket(self, realm, status, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT id FROM ticket")
-        resources = (Ticket(tkt_id) for (tkt_id,) in cursor)
+        def tickets():
+            for tkt_id in cursor:
+                ticket = Ticket(tkt_id)
+                if ticket.values['changetime'] > to_datetime(status):
+                    yield ticket
+        resources = tickets()
         index = self.ticket_created
         return self._reindex(realm, resources, index, feedback, finish_fb)
 
-    def _reindex_milestone(self, realm, feedback, finish_fb):
+    def _reindex_milestone(self, realm, status, feedback, finish_fb):
         resources = Milestone.select(self.env)
         index = self.milestone_created
         return self._reindex(realm, resources, index, feedback, finish_fb)
@@ -345,10 +363,12 @@ class FullTextSearch(Component):
             self.remove_index(realms)
         self.log.info("Started indexing realms: %s",
                       self._fmt_realms(realms))
+        statuses = self._index_status()
         summary = {}
         for realm in realms:
             indexer = self._indexers[realm]
-            num_indexed = indexer(realm, feedback, finish_fb)
+            status = statuses[realm] or 0
+            num_indexed = indexer(realm, status, feedback, finish_fb)
             self.log.debug('Indexed %i resources in realm: "%s"',
                            num_indexed, realm)
             summary[realm] = num_indexed
