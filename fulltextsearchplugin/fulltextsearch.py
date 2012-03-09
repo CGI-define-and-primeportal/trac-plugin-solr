@@ -20,7 +20,6 @@ from trac.resource import (get_resource_shortname, get_resource_url,
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
 from trac.config import Option
-from trac.util import datefmt
 from trac.util.compat import partial
 from trac.util.datefmt import to_utimestamp, utc
 
@@ -529,7 +528,7 @@ class FullTextSearch(Component):
                 title = u'%s: %s' % (milestone.name,
                                      shorten_line(milestone.description)),
                 changed = milestone.completed or milestone.due
-                                              or datetime.now(datefmt.utc),
+                                              or datetime.now(utc),
                 involved = (),
                 popularity = 0, #FIXME
                 oneline = shorten_result(milestone.description),
