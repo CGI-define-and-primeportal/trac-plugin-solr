@@ -330,7 +330,12 @@ class FullTextSearch(Component):
         realms = self._check_realms(realms)
         self.log.info("Removing realms from index: %s",
                       self._fmt_realms(realms))
-        self.backend.remove(self.project, realms)
+        @self.env.with_transaction()
+        def do_remove(db):
+            cursor = db.cursor()
+            self.backend.remove(self.project, realms)
+            cursor.executemany("UPDATE system SET value = '' WHERE name = %s",
+                               [('fulltextsearch_%s' % r,) for r in realms])
 
     def index(self, realms=None, clean=False, feedback=None, finish_fb=None):
         realms = self._check_realms(realms)
