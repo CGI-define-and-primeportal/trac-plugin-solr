@@ -353,7 +353,7 @@ class FullTextSearch(Component):
                            num_indexed, realm)
             summary[realm] = num_indexed
         self.log.info("Completed indexing realms: %s",
-                      self._fmt_realms(realms))
+                      ', '.join('%s (%i)' % (r, summary[r]) for r in realms))
         return summary
 
     def optimize(self):
