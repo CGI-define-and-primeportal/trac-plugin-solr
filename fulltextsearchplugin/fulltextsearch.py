@@ -690,7 +690,6 @@ class FullTextSearch(Component):
         i = 0
         while True:
             response = query.paginate(start=i, rows=page_size).execute()
-            self.log.debug('Response: %r', response)
             for doc in response:
                 yield doc
             if len(response) < page_size:
