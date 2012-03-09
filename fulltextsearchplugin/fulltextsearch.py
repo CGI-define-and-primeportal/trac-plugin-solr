@@ -36,6 +36,11 @@ __all__ = ['IFullTextSearchSource',
 def _do_nothing(*args, **kwargs):
     pass
 
+def _sql_in(seq):
+    '''Return '(%s,%s,...%s)' suitable to use in a SQL in clause.
+    '''
+    return '(%s)' % ','.join('%s' for x in seq)
+
 class IFullTextSearchSource(Interface):
     pass
 
@@ -363,19 +368,26 @@ class FullTextSearch(Component):
             self.upgrade_environment(db)
 
     def environment_needs_upgrade(self, db):
-        cursor = db.cursor()
-        cursor.execute("SELECT value FROM system WHERE name = %s",
-                       ('fulltextsearch_last_fullindex',))
-        result = cursor.fetchone()
-        if result is None:
+        status = self._index_status()
+        if len(status) < len(self.index_realms):
             return True
 
     def upgrade_environment(self, db):
         cursor = db.cursor()
-        self.index()
-        t = to_utimestamp(datetime.now(utc))
-        cursor.execute("INSERT INTO system (name, value) VALUES (%s,%s)",
-                       ('fulltextsearch_last_fullindex', t))
+        status = self._index_status()
+        realms = [r for r in self.index_realms if r not in status]
+        cursor.executemany("INSERT INTO system (name, value) VALUES (%s,%s)",
+                           [('fulltextsearch_%s' % r, '') for r in realms])
+
+    def _index_status(self):
+        '''Return a dictionary of realm:status read from the database
+        '''
+        db = self.env.get_read_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT name, value FROM system WHERE name IN %s"
+                       % _sql_in(self.index_realms),
+                       ['fulltextsearch_%s' % r for r in self.index_realms])
+        return dict((name.split('_', 1)[1], value) for name, value in cursor)
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
