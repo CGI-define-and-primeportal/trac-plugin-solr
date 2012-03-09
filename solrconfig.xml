@@ -914,7 +914,12 @@
       <!-- #define customisation, place any extracted text in the body field.
            See docs at above URL for configuration options. -->
       <str name="fmap.content">body</str>
-      <str name="lowernames">true</str>
+      <!-- #define customisation, the document is fed to Tika which generates
+           an XHTML representation and extracts metadata according to Dublin
+           core standard. DC metadata fields are named with initial caps e.g.
+           Author, Title. In order to keep DC metdata out of the index don't
+           map these field names to lowercase. -->
+      <str name="lowernames">false</str>
       <str name="uprefix">ignored_</str>
 
       <!-- capture link hrefs but ignore div attributes -->
