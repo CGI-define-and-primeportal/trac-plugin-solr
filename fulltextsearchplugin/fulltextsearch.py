@@ -218,25 +218,31 @@ class FullTextSearch(Component):
         return [name for name, label, enabled, indexer in self._realms
                      if indexer]
 
-    def _reindex(self, realm, resources, index_cb, feedback_cb, finish_cb):
+    def _index(self, realm, resources, check_cb, index_cb, update_cb,
+               feedback_cb, finish_cb):
         """Iterate through `resources` to index `realm`, return index count
         
         realm       Trac realm to which items in resources belong
         resources   Iterable of Trac resources e.g. WikiPage, Attachment
-        index_cb    Callable that accepts a resource argument
+        check_cb    Callable that accepts a resource, returns True if it needs
+                    to be indexed
+        index_cb    Callable that accepts a resource, indexes it
+        update_cb   Callable that accepts a resource, records updated status
         feedback_cb Callable that accepts a realm & resource argument
         finish_cb   Callable that accepts a realm & resource argument. The
-                    resource will be None if `resources` is empty
+                    resource will be None if no resources are indexed
         """
         i = -1
         resource = None
+        resources = (r for r in resources if check_cb(r))
         for i, resource in enumerate(resources):
             index_cb(resource)
+            update_cb(resource)
             feedback_cb(realm, resource)
         finish_cb(realm, resource)
         return i + 1
 
-    def _reindex_changeset(self, realm, status, feedback, finish_fb):
+    def _reindex_changeset(self, realm, feedback, finish_fb):
         """Iterate all changesets and call self.changeset_added on them"""
         # TODO Multiple repository support
         repo = self.env.get_repository()
@@ -248,26 +254,31 @@ class FullTextSearch(Component):
                 if rev is None:
                     return
                 yield rev
-        def changesets():
-            for rev in all_revs():
-                changeset = repo.get_changeset(rev)
-                if changeset.date > to_datetime(status):
-                    yield changeset
-        resources = changesets()
+        def check(changeset):
+            return changeset.date > to_datetime(self._get_status(changeset))
+        resources = (repo.get_changeset(rev) for rev in all_revs())
         index = partial(self.changeset_added, repo)
-        return self._reindex(realm, resources, index, feedback, finish_fb)
+        update = self._update_changeset
+        return self._index(realm, resources, check, index, update,
+                           feedback, finish_fb)
 
-    def _reindex_wiki(self, realm, status, feedback, finish_fb):
-        def wikipages():
-            for name in WikiSystem(self.env).get_pages():
-                page = WikiPage(self.env, name)
-                if page.time > to_datetime(status):
-                    yield page
-        resources = wikipages()
+    def _update_changeset(self, changeset):
+        self._set_status(changeset, to_utimestamp(changeset.date))
+
+    def _reindex_wiki(self, realm, feedback, finish_fb):
+        def check(page):
+            return page.time > to_datetime(self._get_status(page))
+        resources = (WikiPage(self.env, name)
+                     for name in WikiSystem(self.env).get_pages())
         index = self.wiki_page_added
-        return self._reindex(realm, resources, index, feedback, finish_fb)
+        update = self._update_wiki
+        return self._index(realm, resources, check, index, update,
+                           feedback, finish_fb)
 
-    def _reindex_attachment(self, realm, status, feedback, finish_fb):
+    def _update_wiki(self, page):
+        self._set_status(page, to_utimestamp(page.time))
+
+    def _reindex_attachment(self, realm, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         # This plugin was originally written for #define 4, a Trac derivative
@@ -291,42 +302,51 @@ class FullTextSearch(Component):
                       GROUP BY c_type, c_id, c_filename) AS current
                      ON type = c_type AND id = c_id
                         AND filename = c_filename AND version = c_version
-                WHERE time > %s
                 ORDER BY time""",
-                (status,))
+                )
         else:
             cursor.execute(
                 "SELECT type,id,filename,description,size,time,author,ipnr "
                 "FROM attachment "
-                "WHERE time > %s "
                 "ORDER by time",
-                (status,))
+                )
         def att(row):
             parent_realm, parent_id = row[0], row[1]
             attachment = Attachment(self.env, parent_realm, parent_id)
             attachment._from_database(*row[2:])
             return attachment
+        def check(attachment):
+            return attachment.date > to_datetime(self._get_status(attachment))
         resources = (att(row) for row in cursor)
         index = self.attachment_added
-        return self._reindex(realm, resources, index, feedback, finish_fb)
+        update = self._update_attachment
+        return self._index(realm, resources, check, index, update,
+                           feedback, finish_fb)
 
-    def _reindex_ticket(self, realm, status, feedback, finish_fb):
+    def _update_attachment(self, attachment):
+        self._set_status(attachment, to_utimestamp(attachment.date))
+
+    def _reindex_ticket(self, realm, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT id FROM ticket")
-        def tickets():
-            for tkt_id in cursor:
-                ticket = Ticket(tkt_id)
-                if ticket.values['changetime'] > to_datetime(status):
-                    yield ticket
-        resources = tickets()
+        def check(ticket):
+            status = self._get_status(ticket)
+            return ticket.values['changetime'] > to_datetime(status)
+        resources = (Ticket(tkt_id) for tkt_id in cursor)
         index = self.ticket_created
-        return self._reindex(realm, resources, index, feedback, finish_fb)
+        update = self._update_ticket
+        return self._index(realm, resources, check, index, update,
+                           feedback, finish_fb)
 
-    def _reindex_milestone(self, realm, status, feedback, finish_fb):
+    def _update_ticket(self, ticket):
+        self._set_status(ticket, to_utimestamp(ticket.values['changetime']))
+
+    def _reindex_milestone(self, realm, feedback, finish_fb):
         resources = Milestone.select(self.env)
         index = self.milestone_created
-        return self._reindex(realm, resources, index, feedback, finish_fb)
+        return self._index(realm, resources, _do_nothing, index, _do_nothing,
+                           feedback, finish_fb)
 
     def _check_realms(self, realms):
         """Check specfied realms are supported by this component
