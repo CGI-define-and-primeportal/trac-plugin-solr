@@ -40,6 +40,13 @@ def _sql_in(seq):
     '''
     return '(%s)' % ','.join('%s' for x in seq)
 
+def _res_id(resource):
+    if resource.parent:
+        return u"%s:%s:%s:%s" % (resource.realm, resource.parent.realm,
+                                 resource.parent.id, resource.id)
+    else:
+        return u"%s:%s"% (resource.realm, resource.id)
+
 class IFullTextSearchSource(Interface):
     pass
 
@@ -98,12 +105,7 @@ class FullTextSearchObject(object):
 
     @property
     def doc_id(self):
-        if self.parent_realm and self.parent_id:
-            return u"%s:%s:%s:%s:%s" % (self.project, self.realm,
-                                        self.parent_realm, self.parent_id,
-                                        self.id)
-        else:
-            return u"%s:%s:%s" % (self.project, self.realm, self.id)
+        return u"%s:%s" % (self.project, _res_id(self.resource))
 
     def __repr__(self):
         from pprint import pformat
