@@ -131,28 +131,28 @@ class Backend(Queue):
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
 
-    def create(self, item):
+    def create(self, item, quiet=False):
         item.action = 'CREATE'
         self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
         
-    def modify(self, item):
+    def modify(self, item, quiet=False):
         item.action = 'MODIFY'
         self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
     
-    def delete(self, item):
+    def delete(self, item, quiet=False):
         item.action = 'DELETE'
         self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
 
-    def add(self, item):
+    def add(self, item, quiet=False):
         if isinstance(item, list):
             for i in item:
                 self.put(i)
         else:
             self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
         
     def remove(self, project_id, realms=None):
         s = self.si_class(self.solr_endpoint)
@@ -162,8 +162,15 @@ class Backend(Queue):
                          [u"realm:%s" % realm for realm in realms])
         s.commit()
 
-    def commit(self):
-        s = self.si_class(self.solr_endpoint)
+    def commit(self, quiet=False):
+        try:
+            s = self.si_class(self.solr_endpoint)
+        except Exception, e:
+            if quiet:
+                self.log.error("Could not commit to Solr due to: %s", e)
+                return
+            else:
+                raise
         while not self.empty():
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
@@ -174,12 +181,18 @@ class Backend(Queue):
             elif item.action == 'DELETE':
                 s.delete(item)
             else:
-                raise Exception("Unknown solr action")
+                if quiet:
+                    self.log.error("Unknown Solr action %s on %s",
+                                   item.action, item)
+                else:
+                    raise ValueError("Unknown Solr action %s on %s"
+                                     % (item.action, item))
             try:
                 s.commit()
-            except Exception:
-                self.log.error('%s %r', item, item)
-                raise
+            except Exception, e:
+                self.log.exception('%s %r', item, item)
+                if not quiet:
+                    raise
 
     def optimize(self):
         s = self.si_class(self.solr_endpoint)
@@ -484,7 +497,7 @@ class FullTextSearch(Component):
                 body = u'%r' % (ticket.values,),
                 comments = [t[4] for t in ticket.get_changelog()],
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
         self.log.debug("Ticket added for indexing: %s", ticket)
         
     def ticket_changed(self, ticket, comment, author, old_values):
@@ -492,7 +505,7 @@ class FullTextSearch(Component):
 
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self.project, ticket.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
         self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
@@ -511,7 +524,7 @@ class FullTextSearch(Component):
                 body = page.text,
                 comments = [r[3] for r in history],
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
         self.log.debug("WikiPage created for indexing: %s", page.name)
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
@@ -519,7 +532,7 @@ class FullTextSearch(Component):
 
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self.project, page.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
 
     def wiki_page_version_deleted(self, page, version, author):
         #We don't care about old versions
@@ -527,7 +540,7 @@ class FullTextSearch(Component):
 
     def wiki_page_renamed(self, page, old_name): 
         so = FullTextSearchObject(self.project, page.resource.realm, old_name)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
         self.wiki_page.added(page)
 
     def _page_tags(self, realm, page):
@@ -579,14 +592,14 @@ class FullTextSearch(Component):
                 comments = comments,
                 involved = involved,
                 )
-        self.backend.create(so)
         if attachment.size <= self.max_size:
             so.body = attachment.open()
+        self.backend.create(so, quiet=True)
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
         so = FullTextSearchObject(self.project, attachment.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
@@ -605,7 +618,7 @@ class FullTextSearch(Component):
                 oneline = shorten_result(milestone.description),
                 body = milestone.description,
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
         self.log.debug("Milestone created for indexing: %s", milestone)
 
     def milestone_changed(self, milestone, old_values):
@@ -619,7 +632,7 @@ class FullTextSearch(Component):
     def milestone_deleted(self, milestone):
         """Called when a milestone is deleted."""
         so = FullTextSearchObject(self.project, milestone.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
 
     def _fill_so(self, changeset, node):
         so = FullTextSearchObject(
@@ -650,7 +663,7 @@ class FullTextSearch(Component):
                 created=changeset.date,
                 changed=changeset.date,
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
 
         # Index the file contents of the repository
         sos = []
@@ -670,7 +683,7 @@ class FullTextSearch(Component):
                                                 action='DELETE'))
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
-        self.backend.add(sos)
+        self.backend.add(sos, quiet=True)
 
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
