@@ -193,6 +193,15 @@ class FullTextSearch(Component):
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8983/solr/",
                            doc="URL to use for HTTP REST calls to Solr")
+
+    search_realms = ListOption("search", "fulltext_search_realms",
+        default=['ticket', 'wiki', 'milestone', 'changeset', 'source',
+                 'attachment'],
+        doc="""Realms for which full-text search should be enabled.
+
+        This option does not affect the realms available for indexing.
+        """)
+
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
@@ -208,10 +217,6 @@ class FullTextSearch(Component):
             ]
         self._indexers = dict((name, indexer) for name, label, enabled, indexer
                                               in self._realms if indexer)
-
-    @property
-    def search_realms(self):
-        return [name for name, label, enabled, indexer in self._realms]
 
     @property
     def index_realms(self):
