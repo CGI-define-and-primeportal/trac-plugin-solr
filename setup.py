@@ -42,11 +42,16 @@ setup(
     package_data = {'fulltextsearchplugin' : ['htdocs/js/*.js', 'htdocs/css/*.css']}, 
     install_requires = ['Trac>=0.12', 'Genshi>=0.5',
                         'sunburnt', 'lxml', 'httplib2',
+                        'TracTags',
+                        'ComponentDependencyPlugin',
                         ],
     entry_points = {
         'trac.plugins': [
             'fulltextsearchplugin.fulltextsearch = fulltextsearchplugin.fulltextsearch',
+            'fulltextsearchplugin.admin = fulltextsearchplugin.admin',
         ]    
     },
     test_suite = 'fulltextsearchplugin.tests.suite',
+    tests_require = ['TracBrowserSvnOperations',
+                     ],
 )

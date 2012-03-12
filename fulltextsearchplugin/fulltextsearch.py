@@ -6,25 +6,54 @@ import sunburnt
 import types
 
 from trac.env import IEnvironmentSetupParticipant
-from trac.admin import IAdminCommandProvider
-from trac.core import Component, implements, Interface
-from trac.ticket.api import ITicketChangeListener, IMilestoneChangeListener, TicketSystem
+from trac.core import Component, implements, Interface, TracError
+from trac.ticket.api import (ITicketChangeListener, IMilestoneChangeListener,
+                             TicketSystem)
 from trac.ticket.model import Ticket, Milestone
+from trac.ticket.web_ui import TicketModule
+from trac.ticket.roadmap import MilestoneModule
 from trac.wiki.api import IWikiChangeListener, WikiSystem
 from trac.wiki.model import WikiPage
+from trac.wiki.web_ui import WikiModule
 from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener, Attachment
+from trac.attachment import AttachmentModule
 from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
-from trac.resource import get_resource_shortname
+from trac.versioncontrol.web_ui import ChangesetModule
+from trac.resource import (get_resource_shortname, get_resource_url,
+                           Resource)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
+from trac.config import IntOption
+from trac.config import ListOption
 from trac.config import Option
-from trac.util import datefmt
-from trac.util.datefmt import to_utimestamp, utc
+from trac.util.compat import partial
+from trac.util.datefmt import to_datetime, to_utimestamp, utc
+from trac.web.chrome import add_warning
 
-__all__ = ['IFullTextSearchSource', 'FullTextSearchModule',
+from componentdependencies import IRequireComponents
+from tractags.model import TagModelProvider
+
+from fulltextsearchplugin.dates import normalise_datetime
+
+__all__ = ['IFullTextSearchSource',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
            ]
+
+def _do_nothing(*args, **kwargs):
+    pass
+
+def _sql_in(seq):
+    '''Return '(%s,%s,...%s)' suitable to use in a SQL in clause.
+    '''
+    return '(%s)' % ','.join('%s' for x in seq)
+
+def _res_id(resource):
+    if resource.parent:
+        return u"%s:%s:%s:%s" % (resource.realm, resource.parent.realm,
+                                 resource.parent.id, resource.id)
+    else:
+        return u"%s:%s"% (resource.realm, resource.id)
 
 class IFullTextSearchSource(Interface):
     pass
@@ -33,28 +62,25 @@ class FullTextSearchModule(Component):
     pass
 
 class FullTextSearchObject(object):
-    def __init__(self, project, resource=None, realm=None, id=None,
+    def __init__(self, project, realm, id=None,
                  parent_realm=None, parent_id=None,
                  title=None, author=None, changed=None, created=None,
                  oneline=None, tags=None, involved=None,
-                 popularity=None, body=None, comments=None, action=None):
+                 popularity=None, body=None, comments=None, action=None,
+                 **kwarg):
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
-        if resource and realm is None:
-            realm = resource.realm
-            id = resource.id
         self.project = project
-        self.realm = realm
-        if parent_realm and parent_id:
-            self.id = u"%s.%s:%s:%s.%s" % (project, realm, parent_realm,
-                                           parent_id, id)
+        if isinstance(realm, Resource):
+            self.resource = realm
         else:
-            self.id = u"%s.%s.%s" % (project, realm, id)
+            parent = parent_realm and Resource(parent_realm, parent_id)
+            self.resource = Resource(realm, id, parent=parent)
 
         self.title = title
         self.author = author
-        self.changed = changed
-        self.created = created
+        self.changed = normalise_datetime(changed)
+        self.created = normalise_datetime(created)
         self.oneline = oneline
         self.tags = tags
         self.involved = involved
@@ -62,6 +88,33 @@ class FullTextSearchObject(object):
         self.body = body
         self.comments = comments
         self.action = action
+
+    def _get_realm(self):
+        return self.resource.realm
+    def _set_realm(self, val):
+        self.resource.realm = val
+    realm = property(_get_realm, _set_realm)
+
+    def _get_id(self):
+        return self.resource.id
+    def _set_id(self, val):
+        self.resource.id = val
+    id = property(_get_id, _set_id)
+
+    @property
+    def parent_realm(self):
+        if self.resource.parent:
+            return self.resource.parent.realm
+
+    @property
+    def parent_id(self):
+        if self.resource.parent:
+            return self.resource.parent.id
+
+    @property
+    def doc_id(self):
+        return u"%s:%s" % (self.project, _res_id(self.resource))
+
     def __repr__(self):
         from pprint import pformat
         r = '<FullTextSearchObject %s>' % pformat(self.__dict__)
@@ -72,42 +125,52 @@ class Backend(Queue):
     """
     """
 
-    def __init__(self, solr_endpoint, log):
+    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface):
         Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
+        self.si_class = si_class
 
-    def create(self, item):
+    def create(self, item, quiet=False):
         item.action = 'CREATE'
         self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
         
-    def modify(self, item):
+    def modify(self, item, quiet=False):
         item.action = 'MODIFY'
         self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
     
-    def delete(self, item):
+    def delete(self, item, quiet=False):
         item.action = 'DELETE'
         self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
 
-    def add(self, item):
+    def add(self, item, quiet=False):
         if isinstance(item, list):
             for i in item:
                 self.put(i)
         else:
             self.put(item)
-        self.commit()
+        self.commit(quiet=quiet)
         
-    def empty_proj(self, project_id):
-        s = sunburnt.SolrInterface(self.solr_endpoint)
+    def remove(self, project_id, realms=None):
+        s = self.si_class(self.solr_endpoint)
+        realms = realms or []
         # I would have like some more info back
-        s.delete(queries = u"id:%s.*" % project_id)
+        s.delete(queries=[u"project:%s" % project_id] +
+                         [u"realm:%s" % realm for realm in realms])
         s.commit()
 
-    def commit(self):
-        s = sunburnt.SolrInterface(self.solr_endpoint)
+    def commit(self, quiet=False):
+        try:
+            s = self.si_class(self.solr_endpoint)
+        except Exception, e:
+            if quiet:
+                self.log.error("Could not commit to Solr due to: %s", e)
+                return
+            else:
+                raise
         while not self.empty():
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
@@ -118,14 +181,26 @@ class Backend(Queue):
             elif item.action == 'DELETE':
                 s.delete(item)
             else:
-                raise Exception("Unknown solr action")
+                if quiet:
+                    self.log.error("Unknown Solr action %s on %s",
+                                   item.action, item)
+                else:
+                    raise ValueError("Unknown Solr action %s on %s"
+                                     % (item.action, item))
             try:
                 s.commit()
-            except Exception:
-                self.log.error('%s %r', item, item)
-                raise
-                
-        
+            except Exception, e:
+                self.log.exception('%s %r', item, item)
+                if not quiet:
+                    raise
+
+    def optimize(self):
+        s = self.si_class(self.solr_endpoint)
+        try:
+            s.optimize()
+        except Exception:
+            self.log.exception("Error optimizing %s", self.solr_endpoint)
+            raise
 
 
 class FullTextSearch(Component):
@@ -133,20 +208,78 @@ class FullTextSearch(Component):
        backend."""
     implements(ITicketChangeListener, IWikiChangeListener, 
                IAttachmentChangeListener, IMilestoneChangeListener,
-               IRepositoryChangeListener, ISearchSource, IAdminCommandProvider,
-               IEnvironmentSetupParticipant)
+               IRepositoryChangeListener, ISearchSource,
+               IEnvironmentSetupParticipant, IRequireComponents)
 
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8983/solr/",
                            doc="URL to use for HTTP REST calls to Solr")
+
+    search_realms = ListOption("search", "fulltext_search_realms",
+        default=['ticket', 'wiki', 'milestone', 'changeset', 'source',
+                 'attachment'],
+        doc="""Realms for which full-text search should be enabled.
+
+        This option does not affect the realms available for indexing.
+        """)
+
+    max_size = IntOption("search", "max_size", 10*2**20, # 10 MB
+        doc="""Maximum document size (in bytes) to indexed.
+        """)
+
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
         self.backend = Backend(self.solr_endpoint, self.log)
         self.project = os.path.split(self.env.path)[1]
+        self._realms = [
+            (u'ticket',     u'Tickets',     True,   self._reindex_ticket),
+            (u'wiki',       u'Wiki',        True,   self._reindex_wiki),
+            (u'milestone',  u'Milestones',  True,   self._reindex_milestone),
+            (u'changeset',  u'Changesets',  True,   self._reindex_changeset),
+            (u'source',     u'File archive', True,  None),
+            (u'attachment', u'Attachments', True,   self._reindex_attachment),
+            ]
+        self._indexers = dict((name, indexer) for name, label, enabled, indexer
+                                              in self._realms if indexer)
+        self._fallbacks = {
+            'TicketModule': TicketModule,
+            'WikiModule': WikiModule,
+            'MilestoneModule': MilestoneModule,
+            'ChangesetModule': ChangesetModule,
+            'AttachmentModule': AttachmentModule,
+            }
 
-    def _reindex_svn(self):
+    @property
+    def index_realms(self):
+        return [name for name, label, enabled, indexer in self._realms
+                     if indexer]
+
+    def _index(self, realm, resources, check_cb, index_cb,
+               feedback_cb, finish_cb):
+        """Iterate through `resources` to index `realm`, return index count
+        
+        realm       Trac realm to which items in resources belong
+        resources   Iterable of Trac resources e.g. WikiPage, Attachment
+        check_cb    Callable that accepts a resource, returns True if it needs
+                    to be indexed
+        index_cb    Callable that accepts a resource, indexes it
+        feedback_cb Callable that accepts a realm & resource argument
+        finish_cb   Callable that accepts a realm & resource argument. The
+                    resource will be None if no resources are indexed
+        """
+        i = -1
+        resource = None
+        resources = (r for r in resources if check_cb(r))
+        for i, resource in enumerate(resources):
+            index_cb(resource)
+            feedback_cb(realm, resource)
+        finish_cb(realm, resource)
+        return i + 1
+
+    def _reindex_changeset(self, realm, feedback, finish_fb):
         """Iterate all changesets and call self.changeset_added on them"""
+        # TODO Multiple repository support
         repo = self.env.get_repository()
         def all_revs():
             rev = repo.oldest_rev
@@ -156,19 +289,27 @@ class FullTextSearch(Component):
                 if rev is None:
                     return
                 yield rev
-        for i, rev in enumerate(all_revs()):
-            self.changeset_added(repo, repo.get_changeset(rev))
-        cnt = i + 1
-        self.log.debug('Reindexed %s changesets (oldest:%s, youngest:%s)',
-                       cnt, repo.oldest_rev, repo.youngest_rev)
-        return cnt
+        def check(changeset):
+            return changeset.date > to_datetime(self._get_status(changeset))
+        resources = (repo.get_changeset(rev) for rev in all_revs())
+        index = partial(self.changeset_added, repo)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
-    def _reindex_wiki(self):
-        for name in WikiSystem(self.env).get_pages():
-            page = WikiPage(self.env, name)
-            self.wiki_page_added(page)
+    def _update_changeset(self, changeset):
+        self._set_status(changeset, to_utimestamp(changeset.date))
 
-    def _reindex_attachment(self):
+    def _reindex_wiki(self, realm, feedback, finish_fb):
+        def check(page):
+            return page.time > to_datetime(self._get_status(page))
+        resources = (WikiPage(self.env, name)
+                     for name in WikiSystem(self.env).get_pages())
+        index = self.wiki_page_added
+        return self._index(realm, resources, check, index, feedback, finish_fb)
+
+    def _update_wiki(self, page):
+        self._set_status(page, to_utimestamp(page.time))
+
+    def _reindex_attachment(self, realm, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         # This plugin was originally written for #define 4, a Trac derivative
@@ -192,62 +333,138 @@ class FullTextSearch(Component):
                       GROUP BY c_type, c_id, c_filename) AS current
                      ON type = c_type AND id = c_id
                         AND filename = c_filename AND version = c_version
-                ORDER BY time""")
+                ORDER BY time""",
+                )
         else:
             cursor.execute(
                 "SELECT type,id,filename,description,size,time,author,ipnr "
-                "FROM attachment"
+                "FROM attachment "
+                "ORDER by time",
                 )
-        for row in cursor:
+        def att(row):
             parent_realm, parent_id = row[0], row[1]
             attachment = Attachment(self.env, parent_realm, parent_id)
             attachment._from_database(*row[2:])
-            self.attachment_added(attachment)
+            return attachment
+        def check(attachment):
+            return attachment.date > to_datetime(self._get_status(attachment))
+        resources = (att(row) for row in cursor)
+        index = self.attachment_added
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
-    def _reindex_ticket(self):
+    def _update_attachment(self, attachment):
+        self._set_status(attachment, to_utimestamp(attachment.date))
+
+    def _reindex_ticket(self, realm, feedback, finish_fb):
         db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT id FROM ticket")
-        for (id,) in cursor:
-            self.ticket_created(Ticket(self.env, id))
+        def check(ticket):
+            status = self._get_status(ticket)
+            return ticket.values['changetime'] > to_datetime(status)
+        resources = (Ticket(tkt_id) for tkt_id in cursor)
+        index = self.ticket_created
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
-    def _reindex_milestone(self):
-        for milestone in Milestone.select(self.env):
-            self.milestone_created(milestone)
-            
-    def reindex(self):
-        self.backend.empty_proj(self.project)
-        num_milestone = self._reindex_milestone()
-        num_tickets = self._reindex_ticket()
-        num_attachment = self._reindex_attachment()
-        num_svn = self._reindex_svn()
-        num_wiki = self._reindex_wiki()
-        self.log.debug('Reindexed %s milestones, %s tickets, %s attachments, %s changesets, %s wiki pages', 
-                       num_milestone, num_tickets, num_attachment, num_svn, num_wiki)
-        return num_svn
+    def _update_ticket(self, ticket):
+        self._set_status(ticket, to_utimestamp(ticket.values['changetime']))
+
+    def _reindex_milestone(self, realm, feedback, finish_fb):
+        resources = Milestone.select(self.env)
+        index = self.milestone_created
+        return self._index(realm, resources, _do_nothing, index,
+                           feedback, finish_fb)
+
+    def _check_realms(self, realms):
+        """Check specfied realms are supported by this component
+        
+        Raise exception if unsupported realms are found.
+        """
+        if realms is None:
+            realms = self.index_realms
+        unsupported_realms = set(realms).difference(set(self.index_realms))
+        if unsupported_realms:
+            raise TracError(_("These realms are not supported by "
+                              "FullTextSearch: %(realms)s",
+                              realms=self._fmt_realms(unsupported_realms)))
+        return realms
+
+    def _fmt_realms(self, realms):
+        return ', '.join(realms)
+
+    def remove_index(self, realms=None):
+        realms = self._check_realms(realms)
+        self.log.info("Removing realms from index: %s",
+                      self._fmt_realms(realms))
+        @self.env.with_transaction()
+        def do_remove(db):
+            cursor = db.cursor()
+            self.backend.remove(self.project, realms)
+            cursor.executemany("DELETE FROM system WHERE name LIKE %s",
+                               [('fulltextsearch_%s:%%' % r,) for r in realms])
+
+    def index(self, realms=None, clean=False, feedback=None, finish_fb=None):
+        realms = self._check_realms(realms)
+        feedback = feedback or _do_nothing
+        finish_fb = finish_fb or _do_nothing
+
+        if clean:
+            self.remove_index(realms)
+        self.log.info("Started indexing realms: %s",
+                      self._fmt_realms(realms))
+        summary = {}
+        for realm in realms:
+            indexer = self._indexers[realm]
+            num_indexed = indexer(realm, feedback, finish_fb)
+            self.log.debug('Indexed %i resources in realm: "%s"',
+                           num_indexed, realm)
+            summary[realm] = num_indexed
+        self.log.info("Completed indexing realms: %s",
+                      ', '.join('%s (%i)' % (r, summary[r]) for r in realms))
+        return summary
+
+    def optimize(self):
+        self.log.info("Started optimizing index")
+        self.backend.optimize()
+        self.log.info("Completed optimizing")
+
+    # IRequireComponents methods
+    def requires(self):
+        return [TagModelProvider]
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
-        self.env.with_transaction()
-        def do_upgrade(db):
-            self.upgrade_environment(db)
+        pass
 
     def environment_needs_upgrade(self, db):
-        cursor = db.cursor()
-        cursor.execute("SELECT value FROM system WHERE name = %s",
-                       ('fulltextsearch_last_fullindex',))
-        result = cursor.fetchone()
-        if result is None:
-            # Use Logica extension/tweak to perform reindex last and stand a
-            # better chance of including everything
-            return 'defer'
+        pass
 
     def upgrade_environment(self, db):
+        pass
+
+    # Index status helpers
+    def _get_status(self, resource):
+        '''Return the index status of a resource'''
+        db = self.env.get_read_db()
         cursor = db.cursor()
-        self.reindex()
-        t = to_utimestamp(datetime.now(utc))
-        cursor.execute("INSERT INTO system (name, value) VALUES (%s,%s)",
-                       ('fulltextsearch_last_fullindex', t))
+        cursor.execute("SELECT value FROM system WHERE name = %s",
+                       (self._status_id(resource),))
+        row = cursor.fetchone()
+        return int(row and row[0] or 0)
+
+    def _set_status(self, resource, status):
+        '''Save the index status of a resource'''
+        @self.env.with_transaction()
+        def do_update(db):
+            cursor = db.cursor()
+            row = (str(status), self._status_id(resource))
+            # TODO use try/except, but take care with psycopg2 and rollbacks
+            cursor.execute("DELETE FROM system WHERE name = %s", row[1:])
+            cursor.execute("INSERT INTO system (value, name) VALUES (%s, %s)",
+                           row)
+
+    def _status_id(self, resource):
+        return 'fulltextsearch_%s' % _res_id(resource.resource)
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
@@ -270,15 +487,17 @@ class FullTextSearch(Component):
                 body = u'%r' % (ticket.values,),
                 comments = [t[4] for t in ticket.get_changelog()],
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
+        self._update_ticket(ticket)
         self.log.debug("Ticket added for indexing: %s", ticket)
         
-    def ticket_changed(self, ticket, comment, author, old_values, action=None):
+    def ticket_changed(self, ticket, comment, author, old_values):
         self.ticket_created(ticket)
 
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self.project, ticket.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
+        self._update_ticket(ticket)
         self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
@@ -297,7 +516,8 @@ class FullTextSearch(Component):
                 body = page.text,
                 comments = [r[3] for r in history],
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
+        self._update_wiki(page)
         self.log.debug("WikiPage created for indexing: %s", page.name)
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
@@ -305,16 +525,16 @@ class FullTextSearch(Component):
 
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self.project, page.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
+        self._update_wiki(page)
 
     def wiki_page_version_deleted(self, page, version, author):
         #We don't care about old versions
         pass
 
     def wiki_page_renamed(self, page, old_name): 
-        so = FullTextSearchObject(self.project, page.resource)
-        so.id = so.id.replace(page.name, old_name) #FIXME, can mess up
-        self.backend.delete(so)
+        so = FullTextSearchObject(self.project, page.resource.realm, old_name)
+        self.backend.delete(so, quiet=True)
         self.wiki_page.added(page)
 
     def _page_tags(self, realm, page):
@@ -359,24 +579,23 @@ class FullTextSearch(Component):
             comments = [attachment.description]
         so = FullTextSearchObject(
                 self.project, attachment.resource,
-                realm = attachment.resource.realm,
-                parent_realm = attachment.parent_realm,
-                parent_id = attachment.parent_id,
-                id = attachment.resource.id,
                 title = attachment.title,
                 author = attachment.author,
                 changed = attachment.date,
                 created = created,
-                body = attachment.open(),
                 comments = comments,
                 involved = involved,
                 )
-        self.backend.create(so)
+        if attachment.size <= self.max_size:
+            so.body = attachment.open()
+        self.backend.create(so, quiet=True)
+        self._update_attachment(attachment)
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
         so = FullTextSearchObject(self.project, attachment.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
+        self._update_attachment(attachment)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
@@ -389,13 +608,13 @@ class FullTextSearch(Component):
                 title = u'%s: %s' % (milestone.name,
                                      shorten_line(milestone.description)),
                 changed = milestone.completed or milestone.due
-                                              or datetime.now(datefmt.utc),
+                                              or datetime.now(utc),
                 involved = (),
                 popularity = 0, #FIXME
                 oneline = shorten_result(milestone.description),
                 body = milestone.description,
                 )
-        self.backend.create(so)
+        self.backend.create(so, quiet=True)
         self.log.debug("Milestone created for indexing: %s", milestone)
 
     def milestone_changed(self, milestone, old_values):
@@ -409,51 +628,59 @@ class FullTextSearch(Component):
     def milestone_deleted(self, milestone):
         """Called when a milestone is deleted."""
         so = FullTextSearchObject(self.project, milestone.resource)
-        self.backend.delete(so)
+        self.backend.delete(so, quiet=True)
 
     def _fill_so(self, changeset, node):
         so = FullTextSearchObject(
-                self.project,
-                realm = u'versioncontrol', id=node.path,
+                self.project, node.resource,
                 title = node.path,
                 oneline = u'[%s]: %s' % (changeset.rev, shorten_result(changeset.message)),
                 comments = [changeset.message],
-                body = node.get_content(),
                 changed = node.get_last_modified(),
                 action = 'CREATE',
                 author = changeset.author,
                 created = changeset.date
                 )
+        if node.content_length <= self.max_size:
+            so.body = node.get_content(),
         return so
 
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
-        # FIXME: This should really create an index of both changesets and
-        # files (two realms; source and changeset)
+        #Index the commit message
+        so = FullTextSearchObject(
+                self.project, changeset.resource,
+                title=u'[%s]: %s' % (changeset.rev,
+                                       shorten_line(changeset.message)),
+                oneline=shorten_result(changeset.message),
+                body=changeset.message,
+                author=changeset.author,
+                created=changeset.date,
+                changed=changeset.date,
+                )
+        self.backend.create(so, quiet=True)
+        self._update_changeset(changeset)
+
+        # Index the file contents of the repository
         sos = []
         for path, kind, change, base_path, base_rev in changeset.get_changes():
+            node = repos.get_node(path, changeset.rev)
             #FIXME handle kind == Node.DIRECTORY
             if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
-                so = self._fill_so(changeset,
-                                   repos.get_node(path, changeset.rev))
-                sos.append(so)
+                sos.append(self._fill_so(changeset, node))
             elif change == Changeset.MOVE:
-                so = FullTextSearchObject(
-                        self.project, realm=u'versioncontrol', id=base_path,
-                        action='DELETE')
-                sos.append(so)
-                so = self._fill_so(changeset,
-                                   repos.get_node(path, changeset.rev))
-                sos.append(so)
+                sos.append(FullTextSearchObject(self.project,
+                                                node.resource.realm, base_path,
+                                                action='DELETE'))
+                sos.append(self._fill_so(changeset, node))
             elif change == Changeset.DELETE:
-                so = FullTextSearchObject(
-                        self.project, realm=u'versioncontrol', id=path,
-                        action='DELETE')
-                sos.append(so)
+                sos.append(FullTextSearchObject(self.project,
+                                                node.resource.realm, path,
+                                                action='DELETE'))
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
-        self.backend.add(sos)
+        self.backend.add(sos, quiet=True)
 
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
@@ -468,12 +695,24 @@ class FullTextSearch(Component):
     # ISearchSource methods.
 
     def get_search_filters(self, req):
-        yield (u'ticket', u'Tickets', True)
-        yield (u'wiki', u'Wiki', True)
-        yield (u'milestone', u'Milestones', True)
-        yield (u'changeset', u'Changesets', True)
-        yield (u'versioncontrol', u'File archive', True)
-        yield (u'attachment', u'Attachments', True)
+        return [(name, label, enabled) for name, label, enabled, indexer 
+                                       in self._realms]
+
+    def get_search_results(self, req, terms, filters):
+        self.log.debug("get_search_result called")
+        try:
+            query, response = self._do_search(terms, filters)
+        except:
+            return self._do_fallback(req, terms, filters)
+        docs = (FullTextSearchObject(**doc) for doc in self._docs(query))
+        def _result(doc):
+            changed = doc.changed
+            href = get_resource_url(self.env, doc.resource, req.href)
+            title = doc.title or get_resource_shortname(self.env, doc.resource)
+            author = ", ".join(doc.author or [])
+            excerpt = doc.oneline or ''
+            return (href, title, changed, author, excerpt)
+        return [_result(doc) for doc in docs]
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
@@ -482,10 +721,7 @@ class FullTextSearch(Component):
         The filter is of the form realm:realm1 OR realm:realm2 OR ...
         """
         Q = si.query().Q
-        my_filters = filters[:]
-        for field in my_filters:
-            if field not in [shortname for (shortname,t2,t3) in self.get_search_filters(None)]:
-                my_filters.remove(field)
+        my_filters = [f for f in filters if f in self.search_realms]
         def rec(list1):
             if len(list1) > 2:
                 return Q(realm=list1.pop()) | rec(list1)
@@ -499,12 +735,12 @@ class FullTextSearch(Component):
                 return ""
         return rec(my_filters[:])
 
-    def get_search_results(self, req, terms, filters):
-        self.log.debug("get_search_result called")
+    def _do_search(self, terms, filters, facet='realm', sort_by=None,
+                                         field_limit=None):
         try:
-            si = sunburnt.SolrInterface(self.solr_endpoint)
+            si = self.backend.si_class(self.solr_endpoint)
         except:
-            return #until solr is packaged
+            raise
 
         # Restrict search to chosen realms, if none of our filters were chosen
         # then we won't have any results - return early, empty handed
@@ -514,66 +750,46 @@ class FullTextSearch(Component):
             return
 
         # The index can store multiple projects, restrict results to this one
-	filter_q &= si.query().Q(project=self.project)
+        filter_q &= si.query().Q(project=self.project)
 
-        if self._has_wildcard(terms):
-            self.log.debug("Found wildcard query, switching to standard parser")
-            result = si.query(terms).filter(filter_q).facet_by('realm').execute()
-        else:
-            opts = {
-                # Search for terms (q) using dismax query type (qt).
-                # No query fields (qf) are specified so search in default
-                # fields, with default weightings
-                'q': terms, 'qt': "dismax",
-                # As well as the results, return num of results in each realm
-                'facet': True, 'facet.field': "realm",
-                # Filter query results by realm and project
-                'fq': filter_q,
-                }
-            result = si.search(**opts)
-        self.log.debug("Facets: %s", result.facet_counts.facet_fields)
-        for doc in result.result.docs:
-            date = doc.get('changed', None)
-            if date is not None:
-                date = datetime.fromtimestamp((date._dt_obj.ticks()), tz=datefmt.localtz)  #if we get mx.datetime
-                #date = date._dt_obj.replace(tzinfo=datefmt.localtz) # if we get datetime.datetime
-            (proj,realm,rid) = doc['id'].split('.', 2)
-            # try hard to get some 'title' which is needed for clicking on
-            title   = doc.get('title', rid)
-            if realm == 'versioncontrol':
-                href = req.href('browser', rid)
-            elif 'attachment:' in realm:    #FIXME hacky stuff here
-                href = req.href(realm.replace(':','/'), rid)
-                # FIXME is there a better way to do this?
-                if realm.split(":")[1] == "wiki":
-                    title = _(u"%(filename)s (attached to page %(wiki_page)s)",
-                              filename=rid, wiki_page=realm.split(":")[2])
-                if realm.split(":")[1] == "ticket":
-                    title = _(u"%(filename)s (attached to ticket #%(ticket)s)",
-                              filename=rid, ticket=realm.split(":")[2])
-            else:
-                href = req.href(realm, rid)
-            author  = doc.get('author','')
-            if isinstance(author,types.ListType):
-                author = ", ".join(author)
-            excerpt = doc.get('oneline','')
-            yield (href, title, date, author, excerpt)
+        # Construct a query that searches for terms in docs that match chosen
+        # realms and current project
+        query = si.query(terms).filter(filter_q)
 
-    def _has_wildcard(self, terms):
-        for term in terms:
-            if '*' in term:
-                return True
-        return False
-    #IAdminCommandProvider methods
-    def get_admin_commands(self):
-        yield ('fulltext reindex', '',
-               'Throw away everything in text index and add it again',
-               self._complete_admin_command, self._admin_reindex)
+        if facet:
+            query = query.facet_by(facet)
+        for field in sort_by or []:
+            query = query.sort_by(field)
+        if field_limit:
+            query = query.field_limit(field_limit)
 
-    def _complete_admin_command(self, args):
-        return []
+        # Submit the query to Solr, response contains the first 10 results
+        response = query.execute()
+        if facet:
+            self.log.debug("Facets: %s", response.facet_counts.facet_fields)
 
-    def _admin_reindex(self):
-        self.reindex()
-        print "reindex done"
+        return query, response
 
+    def _docs(self, query, page_size=10):
+        """Return a generator of all the docs in query.
+        """
+        i = 0
+        while True:
+            response = query.paginate(start=i, rows=page_size).execute()
+            for doc in response:
+                yield doc
+            if len(response) < page_size:
+                break
+            i += page_size
+
+    def _do_fallback(self, req, terms, filters):
+        self.log.warning("Falling back to Trac internal search")
+        add_warning(req, _("Full text search is unavailable, some search "
+                           "results may be missing"))
+        # Based on SearchModule._do_search()
+        results = []
+        for name in self.env.config.getlist('search', 'disabled_sources'):
+            source = self._fallbacks[name](self.env)
+            results.extend(source.get_search_results(req, terms, filters)
+                           or [])
+        return results
