@@ -576,7 +576,6 @@ class FullTextSearch(Component):
                 author = attachment.author,
                 changed = attachment.date,
                 created = created,
-                body = attachment.open(),
                 comments = comments,
                 involved = involved,
                 )
@@ -628,7 +627,6 @@ class FullTextSearch(Component):
                 title = node.path,
                 oneline = u'[%s]: %s' % (changeset.rev, shorten_result(changeset.message)),
                 comments = [changeset.message],
-                body = node.get_content(),
                 changed = node.get_last_modified(),
                 action = 'CREATE',
                 author = changeset.author,
