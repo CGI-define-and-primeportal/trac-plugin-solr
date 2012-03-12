@@ -353,8 +353,8 @@ class FullTextSearch(Component):
         def do_remove(db):
             cursor = db.cursor()
             self.backend.remove(self.project, realms)
-            cursor.executemany("UPDATE system SET value = '' WHERE name = %s",
-                               [('fulltextsearch_%s' % r,) for r in realms])
+            cursor.executemany("DELETE FROM system WHERE name LIKE %s",
+                               [('fulltextsearch_%s:%%' % r,) for r in realms])
 
     def index(self, realms=None, clean=False, feedback=None, finish_fb=None):
         realms = self._check_realms(realms)
@@ -365,12 +365,10 @@ class FullTextSearch(Component):
             self.remove_index(realms)
         self.log.info("Started indexing realms: %s",
                       self._fmt_realms(realms))
-        statuses = self._index_status()
         summary = {}
         for realm in realms:
             indexer = self._indexers[realm]
-            status = statuses[realm] or 0
-            num_indexed = indexer(realm, status, feedback, finish_fb)
+            num_indexed = indexer(realm, feedback, finish_fb)
             self.log.debug('Indexed %i resources in realm: "%s"',
                            num_indexed, realm)
             summary[realm] = num_indexed
@@ -397,15 +395,29 @@ class FullTextSearch(Component):
     def upgrade_environment(self, db):
         pass
 
-    def _index_status(self):
-        '''Return a dictionary of realm:status read from the database
-        '''
+    # Index status helpers
+    def _get_status(self, resource):
+        '''Return the index status of a resource'''
         db = self.env.get_read_db()
         cursor = db.cursor()
-        cursor.execute("SELECT name, value FROM system WHERE name IN %s"
-                       % _sql_in(self.index_realms),
-                       ['fulltextsearch_%s' % r for r in self.index_realms])
-        return dict((name.split('_', 1)[1], value) for name, value in cursor)
+        cursor.execute("SELECT value FROM system WHERE name = %s",
+                       (self._status_id(resource),))
+        row = cursor.fetchone()
+        return int(row and row[0] or 0)
+
+    def _set_status(self, resource, status):
+        '''Save the index status of a resource'''
+        @self.env.with_transaction()
+        def do_update(db):
+            cursor = db.cursor()
+            row = (str(status), self._status_id(resource))
+            # TODO use try/except, but take care with psycopg2 and rollbacks
+            cursor.execute("DELETE FROM system WHERE name = %s", row[1:])
+            cursor.execute("INSERT INTO system (value, name) VALUES (%s, %s)",
+                           row)
+
+    def _status_id(self, resource):
+        return 'fulltextsearch_%s' % _res_id(resource.resource)
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
