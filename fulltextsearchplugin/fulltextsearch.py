@@ -255,7 +255,7 @@ class FullTextSearch(Component):
         return [name for name, label, enabled, indexer in self._realms
                      if indexer]
 
-    def _index(self, realm, resources, check_cb, index_cb, update_cb,
+    def _index(self, realm, resources, check_cb, index_cb,
                feedback_cb, finish_cb):
         """Iterate through `resources` to index `realm`, return index count
         
@@ -264,7 +264,6 @@ class FullTextSearch(Component):
         check_cb    Callable that accepts a resource, returns True if it needs
                     to be indexed
         index_cb    Callable that accepts a resource, indexes it
-        update_cb   Callable that accepts a resource, records updated status
         feedback_cb Callable that accepts a realm & resource argument
         finish_cb   Callable that accepts a realm & resource argument. The
                     resource will be None if no resources are indexed
@@ -295,9 +294,7 @@ class FullTextSearch(Component):
             return changeset.date > to_datetime(self._get_status(changeset))
         resources = (repo.get_changeset(rev) for rev in all_revs())
         index = partial(self.changeset_added, repo)
-        update = self._update_changeset
-        return self._index(realm, resources, check, index, update,
-                           feedback, finish_fb)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_changeset(self, changeset):
         self._set_status(changeset, to_utimestamp(changeset.date))
@@ -308,9 +305,7 @@ class FullTextSearch(Component):
         resources = (WikiPage(self.env, name)
                      for name in WikiSystem(self.env).get_pages())
         index = self.wiki_page_added
-        update = self._update_wiki
-        return self._index(realm, resources, check, index, update,
-                           feedback, finish_fb)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_wiki(self, page):
         self._set_status(page, to_utimestamp(page.time))
@@ -356,9 +351,7 @@ class FullTextSearch(Component):
             return attachment.date > to_datetime(self._get_status(attachment))
         resources = (att(row) for row in cursor)
         index = self.attachment_added
-        update = self._update_attachment
-        return self._index(realm, resources, check, index, update,
-                           feedback, finish_fb)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_attachment(self, attachment):
         self._set_status(attachment, to_utimestamp(attachment.date))
@@ -372,9 +365,7 @@ class FullTextSearch(Component):
             return ticket.values['changetime'] > to_datetime(status)
         resources = (Ticket(tkt_id) for tkt_id in cursor)
         index = self.ticket_created
-        update = self._update_ticket
-        return self._index(realm, resources, check, index, update,
-                           feedback, finish_fb)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_ticket(self, ticket):
         self._set_status(ticket, to_utimestamp(ticket.values['changetime']))
@@ -382,7 +373,7 @@ class FullTextSearch(Component):
     def _reindex_milestone(self, realm, feedback, finish_fb):
         resources = Milestone.select(self.env)
         index = self.milestone_created
-        return self._index(realm, resources, _do_nothing, index, _do_nothing,
+        return self._index(realm, resources, _do_nothing, index,
                            feedback, finish_fb)
 
     def _check_realms(self, realms):
@@ -498,6 +489,7 @@ class FullTextSearch(Component):
                 comments = [t[4] for t in ticket.get_changelog()],
                 )
         self.backend.create(so, quiet=True)
+        self._update_ticket(ticket)
         self.log.debug("Ticket added for indexing: %s", ticket)
         
     def ticket_changed(self, ticket, comment, author, old_values):
@@ -506,6 +498,7 @@ class FullTextSearch(Component):
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self.project, ticket.resource)
         self.backend.delete(so, quiet=True)
+        self._update_ticket(ticket)
         self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
@@ -525,6 +518,7 @@ class FullTextSearch(Component):
                 comments = [r[3] for r in history],
                 )
         self.backend.create(so, quiet=True)
+        self._update_wiki(page)
         self.log.debug("WikiPage created for indexing: %s", page.name)
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
@@ -533,6 +527,7 @@ class FullTextSearch(Component):
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self.project, page.resource)
         self.backend.delete(so, quiet=True)
+        self._update_wiki(page)
 
     def wiki_page_version_deleted(self, page, version, author):
         #We don't care about old versions
@@ -595,11 +590,13 @@ class FullTextSearch(Component):
         if attachment.size <= self.max_size:
             so.body = attachment.open()
         self.backend.create(so, quiet=True)
+        self._update_attachment(attachment)
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
         so = FullTextSearchObject(self.project, attachment.resource)
         self.backend.delete(so, quiet=True)
+        self._update_attachment(attachment)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
@@ -664,6 +661,7 @@ class FullTextSearch(Component):
                 changed=changeset.date,
                 )
         self.backend.create(so, quiet=True)
+        self._update_changeset(changeset)
 
         # Index the file contents of the repository
         sos = []
