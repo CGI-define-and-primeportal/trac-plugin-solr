@@ -199,7 +199,7 @@ class Backend(Queue):
         try:
             s.optimize()
         except Exception:
-            self.log.error('%s %r', item, item)
+            self.log.exception("Error optimizing %s", self.solr_endpoint)
             raise
 
 
