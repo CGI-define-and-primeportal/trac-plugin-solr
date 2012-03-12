@@ -387,21 +387,13 @@ class FullTextSearch(Component):
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
-        self.env.with_transaction()
-        def do_upgrade(db):
-            self.upgrade_environment(db)
+        pass
 
     def environment_needs_upgrade(self, db):
-        status = self._index_status()
-        if len(status) < len(self.index_realms):
-            return True
+        pass
 
     def upgrade_environment(self, db):
-        cursor = db.cursor()
-        status = self._index_status()
-        realms = [r for r in self.index_realms if r not in status]
-        cursor.executemany("INSERT INTO system (name, value) VALUES (%s,%s)",
-                           [('fulltextsearch_%s' % r, '') for r in realms])
+        pass
 
     def _index_status(self):
         '''Return a dictionary of realm:status read from the database
