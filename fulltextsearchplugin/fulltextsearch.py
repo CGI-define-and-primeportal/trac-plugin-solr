@@ -24,6 +24,7 @@ from trac.resource import (get_resource_shortname, get_resource_url,
                            Resource)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
+from trac.config import IntOption
 from trac.config import ListOption
 from trac.config import Option
 from trac.util.compat import partial
@@ -207,6 +208,10 @@ class FullTextSearch(Component):
         doc="""Realms for which full-text search should be enabled.
 
         This option does not affect the realms available for indexing.
+        """)
+
+    max_size = IntOption("search", "max_size", 10*2**20, # 10 MB
+        doc="""Maximum document size (in bytes) to indexed.
         """)
 
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
@@ -576,6 +581,8 @@ class FullTextSearch(Component):
                 involved = involved,
                 )
         self.backend.create(so)
+        if attachment.size <= self.max_size:
+            so.body = attachment.open()
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
@@ -627,6 +634,8 @@ class FullTextSearch(Component):
                 author = changeset.author,
                 created = changeset.date
                 )
+        if node.content_length <= self.max_size:
+            so.body = node.get_content(),
         return so
 
     #IRepositoryChangeListener methods
