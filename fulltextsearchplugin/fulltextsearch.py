@@ -19,6 +19,7 @@ from trac.resource import (get_resource_shortname, get_resource_url,
                            Resource)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
+from trac.config import ListOption
 from trac.config import Option
 from trac.util.compat import partial
 from trac.util.datefmt import to_datetime, to_utimestamp, utc
