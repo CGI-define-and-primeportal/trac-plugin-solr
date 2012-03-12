@@ -273,7 +273,6 @@ class FullTextSearch(Component):
         resources = (r for r in resources if check_cb(r))
         for i, resource in enumerate(resources):
             index_cb(resource)
-            update_cb(resource)
             feedback_cb(realm, resource)
         finish_cb(realm, resource)
         return i + 1
