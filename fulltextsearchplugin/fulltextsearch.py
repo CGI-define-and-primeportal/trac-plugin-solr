@@ -10,11 +10,16 @@ from trac.core import Component, implements, Interface, TracError
 from trac.ticket.api import (ITicketChangeListener, IMilestoneChangeListener,
                              TicketSystem)
 from trac.ticket.model import Ticket, Milestone
+from trac.ticket.web_ui import TicketModule
+from trac.ticket.roadmap import MilestoneModule
 from trac.wiki.api import IWikiChangeListener, WikiSystem
 from trac.wiki.model import WikiPage
+from trac.wiki.web_ui import WikiModule
 from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener, Attachment
+from trac.attachment import AttachmentModule
 from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
+from trac.versioncontrol.web_ui import ChangesetModule
 from trac.resource import (get_resource_shortname, get_resource_url,
                            Resource)
 from trac.search import ISearchSource, shorten_result
@@ -23,6 +28,7 @@ from trac.config import ListOption
 from trac.config import Option
 from trac.util.compat import partial
 from trac.util.datefmt import to_datetime, to_utimestamp, utc
+from trac.web.chrome import add_warning
 
 from componentdependencies import IRequireComponents
 from tractags.model import TagModelProvider
@@ -218,6 +224,13 @@ class FullTextSearch(Component):
             ]
         self._indexers = dict((name, indexer) for name, label, enabled, indexer
                                               in self._realms if indexer)
+        self._fallbacks = {
+            'TicketModule': TicketModule,
+            'WikiModule': WikiModule,
+            'MilestoneModule': MilestoneModule,
+            'ChangesetModule': ChangesetModule,
+            'AttachmentModule': AttachmentModule,
+            }
 
     @property
     def index_realms(self):
@@ -670,15 +683,19 @@ class FullTextSearch(Component):
 
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
-        query, response = self._do_search(terms, filters)
+        try:
+            query, response = self._do_search(terms, filters)
+        except:
+            return self._do_fallback(req, terms, filters)
         docs = (FullTextSearchObject(**doc) for doc in self._docs(query))
-        for doc in docs:
+        def _result(doc):
             changed = doc.changed
             href = get_resource_url(self.env, doc.resource, req.href)
             title = doc.title or get_resource_shortname(self.env, doc.resource)
             author = ", ".join(doc.author or [])
             excerpt = doc.oneline or ''
-            yield (href, title, changed, author, excerpt)
+            return (href, title, changed, author, excerpt)
+        return [_result(doc) for doc in docs]
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
@@ -747,3 +764,15 @@ class FullTextSearch(Component):
             if len(response) < page_size:
                 break
             i += page_size
+
+    def _do_fallback(self, req, terms, filters):
+        self.log.warning("Falling back to Trac internal search")
+        add_warning(req, _("Full text search is unavailable, some search "
+                           "results may be missing"))
+        # Based on SearchModule._do_search()
+        results = []
+        for name in self.env.config.getlist('search', 'disabled_sources'):
+            source = self._fallbacks[name](self.env)
+            results.extend(source.get_search_results(req, terms, filters)
+                           or [])
+        return results
