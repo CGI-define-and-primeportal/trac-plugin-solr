@@ -371,9 +371,10 @@ class FullTextSearch(Component):
 
     def _reindex_milestone(self, realm, feedback, finish_fb):
         resources = Milestone.select(self.env)
+        def check(milestone):
+            return True
         index = self.milestone_created
-        return self._index(realm, resources, _do_nothing, index,
-                           feedback, finish_fb)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _check_realms(self, realms):
         """Check specfied realms are supported by this component
