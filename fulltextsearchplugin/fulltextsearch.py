@@ -678,10 +678,12 @@ class FullTextSearch(Component):
             if change == Changeset.MOVE:
                 sos.append(FullTextSearchObject(self.project,
                                                 'source', base_path,
+                                                repos.resource,
                                                 action='DELETE'))
             elif change == Changeset.DELETE:
                 sos.append(FullTextSearchObject(self.project,
                                                 'source', path,
+                                                repos.resource,
                                                 action='DELETE'))
             if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
                           Changeset.MOVE):
