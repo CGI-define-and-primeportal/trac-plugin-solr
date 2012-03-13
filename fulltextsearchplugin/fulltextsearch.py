@@ -178,7 +178,8 @@ class Backend(Queue):
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
                 if hasattr(item.body, 'read'):
-                    s.add(item, extract=True)
+                    s.add(item, extract=True, override_title=item.title,
+                          override_author=item.author)
                 else:
                     s.add(item) #We can add multiple documents if we want
             elif item.action == 'DELETE':
