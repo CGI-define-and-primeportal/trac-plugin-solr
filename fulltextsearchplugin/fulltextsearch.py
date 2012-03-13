@@ -362,7 +362,7 @@ class FullTextSearch(Component):
         def check(ticket):
             status = self._get_status(ticket)
             return ticket.values['changetime'] > to_datetime(status)
-        resources = (Ticket(tkt_id) for tkt_id in cursor)
+        resources = (Ticket(self.env, tkt_id) for (tkt_id,) in cursor)
         index = self.ticket_created
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
