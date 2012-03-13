@@ -21,7 +21,7 @@ from trac.attachment import AttachmentModule
 from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
 from trac.versioncontrol.web_ui import ChangesetModule
 from trac.resource import (get_resource_shortname, get_resource_url,
-                           Resource)
+                           Resource, ResourceNotFound)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
 from trac.config import IntOption
@@ -587,7 +587,12 @@ class FullTextSearch(Component):
                 involved = involved,
                 )
         if attachment.size <= self.max_size:
-            so.body = attachment.open()
+            try:
+                so.body = attachment.open()
+            except ResourceNotFound:
+                self.log.warning('Missing attachment file "%s" encountered '
+                                 'whilst indexing full text search', 
+                                 attachment)
         self.backend.create(so, quiet=True)
         self._update_attachment(attachment)
 
