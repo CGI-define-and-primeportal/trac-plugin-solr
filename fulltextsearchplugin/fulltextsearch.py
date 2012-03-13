@@ -671,19 +671,19 @@ class FullTextSearch(Component):
         # Index the file contents of the repository
         sos = []
         for path, kind, change, base_path, base_rev in changeset.get_changes():
-            node = repos.get_node(path, changeset.rev)
             #FIXME handle kind == Node.DIRECTORY
-            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
-                sos.append(self._fill_so(changeset, node))
-            elif change == Changeset.MOVE:
+            if change == Changeset.MOVE:
                 sos.append(FullTextSearchObject(self.project,
-                                                node.resource.realm, base_path,
+                                                'source', base_path,
                                                 action='DELETE'))
-                sos.append(self._fill_so(changeset, node))
             elif change == Changeset.DELETE:
                 sos.append(FullTextSearchObject(self.project,
-                                                node.resource.realm, path,
+                                                'source', path,
                                                 action='DELETE'))
+            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
+                          Changeset.MOVE):
+                node = repos.get_node(path, changeset.rev)
+                sos.append(self._fill_so(changeset, node))
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
         self.backend.add(sos, quiet=True)
