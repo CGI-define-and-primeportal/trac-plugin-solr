@@ -74,7 +74,10 @@ class FullTextSearchObject(object):
         if isinstance(realm, Resource):
             self.resource = realm
         else:
-            parent = parent_realm and Resource(parent_realm, parent_id)
+            if isinstance(parent_realm, Resource):
+                parent = parent_realm
+            else:
+                parent = Resource(parent_realm, parent_id)
             self.resource = Resource(realm, id, parent=parent)
 
         self.title = title
