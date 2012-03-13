@@ -647,7 +647,7 @@ class FullTextSearch(Component):
                 created = changeset.date
                 )
         if node.content_length <= self.max_size:
-            so.body = node.get_content(),
+            so.body = node.get_content()
         return so
 
     #IRepositoryChangeListener methods
