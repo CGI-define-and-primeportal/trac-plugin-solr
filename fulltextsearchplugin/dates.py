@@ -1,3 +1,4 @@
+from datetime import datetime
 from trac.util import datefmt
 
 def normalise_datetime(date):
@@ -14,4 +15,5 @@ def normalise_datetime(date):
         return date.replace(tzinfo=datefmt.localtz)
     except AttributeError:
         # mxDateTime
-        return date.pydatetime().replace(tzinfo=datefmt.localtz)
+        date = datetime.fromtimestamp(date.ticks())
+        return date.replace(tzinfo=datefmt.localtz)

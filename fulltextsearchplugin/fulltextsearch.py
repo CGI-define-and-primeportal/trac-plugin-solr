@@ -21,7 +21,7 @@ from trac.attachment import AttachmentModule
 from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
 from trac.versioncontrol.web_ui import ChangesetModule
 from trac.resource import (get_resource_shortname, get_resource_url,
-                           Resource)
+                           Resource, ResourceNotFound)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
 from trac.config import IntOption
@@ -74,7 +74,10 @@ class FullTextSearchObject(object):
         if isinstance(realm, Resource):
             self.resource = realm
         else:
-            parent = parent_realm and Resource(parent_realm, parent_id)
+            if isinstance(parent_realm, Resource):
+                parent = parent_realm
+            else:
+                parent = Resource(parent_realm, parent_id)
             self.resource = Resource(realm, id, parent=parent)
 
         self.title = title
@@ -175,7 +178,8 @@ class Backend(Queue):
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
                 if hasattr(item.body, 'read'):
-                    s.add(item, extract=True)
+                    s.add(item, extract=True, override_title=item.title,
+                          override_author=item.author)
                 else:
                     s.add(item) #We can add multiple documents if we want
             elif item.action == 'DELETE':
@@ -362,7 +366,7 @@ class FullTextSearch(Component):
         def check(ticket):
             status = self._get_status(ticket)
             return ticket.values['changetime'] > to_datetime(status)
-        resources = (Ticket(tkt_id) for tkt_id in cursor)
+        resources = (Ticket(self.env, tkt_id) for (tkt_id,) in cursor)
         index = self.ticket_created
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
@@ -371,9 +375,10 @@ class FullTextSearch(Component):
 
     def _reindex_milestone(self, realm, feedback, finish_fb):
         resources = Milestone.select(self.env)
+        def check(milestone):
+            return True
         index = self.milestone_created
-        return self._index(realm, resources, _do_nothing, index,
-                           feedback, finish_fb)
+        return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _check_realms(self, realms):
         """Check specfied realms are supported by this component
@@ -587,7 +592,12 @@ class FullTextSearch(Component):
                 involved = involved,
                 )
         if attachment.size <= self.max_size:
-            so.body = attachment.open()
+            try:
+                so.body = attachment.open()
+            except ResourceNotFound:
+                self.log.warning('Missing attachment file "%s" encountered '
+                                 'whilst indexing full text search', 
+                                 attachment)
         self.backend.create(so, quiet=True)
         self._update_attachment(attachment)
 
@@ -642,7 +652,7 @@ class FullTextSearch(Component):
                 created = changeset.date
                 )
         if node.content_length <= self.max_size:
-            so.body = node.get_content(),
+            so.body = node.get_content()
         return so
 
     #IRepositoryChangeListener methods
@@ -665,19 +675,21 @@ class FullTextSearch(Component):
         # Index the file contents of the repository
         sos = []
         for path, kind, change, base_path, base_rev in changeset.get_changes():
-            node = repos.get_node(path, changeset.rev)
             #FIXME handle kind == Node.DIRECTORY
-            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY):
-                sos.append(self._fill_so(changeset, node))
-            elif change == Changeset.MOVE:
+            if change == Changeset.MOVE:
                 sos.append(FullTextSearchObject(self.project,
-                                                node.resource.realm, base_path,
+                                                'source', base_path,
+                                                repos.resource,
                                                 action='DELETE'))
-                sos.append(self._fill_so(changeset, node))
             elif change == Changeset.DELETE:
                 sos.append(FullTextSearchObject(self.project,
-                                                node.resource.realm, path,
+                                                'source', path,
+                                                repos.resource,
                                                 action='DELETE'))
+            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
+                          Changeset.MOVE):
+                node = repos.get_node(path, changeset.rev)
+                sos.append(self._fill_so(changeset, node))
         for so in sos:
             self.log.debug("Indexing: %s", so.title)
         self.backend.add(sos, quiet=True)

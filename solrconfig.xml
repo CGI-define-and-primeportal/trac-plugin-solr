@@ -916,16 +916,21 @@
       <str name="fmap.content">body</str>
       <!-- #define customisation, the document is fed to Tika which generates
            an XHTML representation and extracts metadata according to Dublin
-           core standard. DC metadata fields are named with initial caps e.g.
-           Author, Title. In order to keep DC metdata out of the index don't
-           map these field names to lowercase. -->
-      <str name="lowernames">false</str>
+           core field names, but with varying case (e.g. Author, title).
+           Since we would like our literal values to override Tika provided
+           ones, do some manual shuffling.
+           See:
+           http://wiki.apache.org/solr/ExtractingRequestHandler#Order_of_field_operations
+           https://issues.apache.org/jira/browse/SOLR-1856
+           https://issues.apache.org/jira/browse/SOLR-1856
+           https://issues.apache.org/jira/browse/SOLR-1856
+        -->
+      <str name="lowernames">true</str>
+      <str name="fmap.title">ignored_title</str>
+      <str name="fmap.override_title">title</str>
+      <str name="fmap.author">ignored_author</str>
+      <str name="fmap.override_author">author</str>
       <str name="uprefix">ignored_</str>
-
-      <!-- capture link hrefs but ignore div attributes -->
-      <str name="captureAttr">true</str>
-      <str name="fmap.a">links</str>
-      <str name="fmap.div">ignored_</str>
     </lst>
   </requestHandler>
 
