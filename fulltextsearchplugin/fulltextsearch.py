@@ -63,6 +63,8 @@ class FullTextSearchModule(Component):
     pass
 
 class FullTextSearchObject(object):
+    '''Minimal behaviour class to store documents going to/comping from Solr.
+    '''
     def __init__(self, project, realm, id=None,
                  parent_realm=None, parent_id=None,
                  title=None, author=None, changed=None, created=None,
