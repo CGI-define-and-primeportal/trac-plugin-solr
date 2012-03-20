@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import re
 import sunburnt
+from sunburnt.sunburnt import grouper
 import types
 
 from trac.env import IEnvironmentSetupParticipant
@@ -660,6 +661,19 @@ class FullTextSearch(Component):
             so.body = node.get_content()
         return so
 
+    def _changes(self, repos, changeset):
+        for path, kind, change, base_path, base_rev in changeset.get_changes():
+            if change == Changeset.MOVE:
+                yield FullTextSearchObject(self.project, 'source', base_path,
+                                           repos.resource, action='DELETE')
+            elif change == Changeset.DELETE:
+                yield FullTextSearchObject(self.project, 'source', path,
+                                           repos.resource, action='DELETE')
+            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
+                          Changeset.MOVE):
+                node = repos.get_node(path, changeset.rev)
+                yield self._fill_so(changeset, node)
+
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
@@ -677,27 +691,14 @@ class FullTextSearch(Component):
         self.backend.create(so, quiet=True)
         self._update_changeset(changeset)
 
-        # Index the file contents of the repository
-        sos = []
-        for path, kind, change, base_path, base_rev in changeset.get_changes():
-            #FIXME handle kind == Node.DIRECTORY
-            if change == Changeset.MOVE:
-                sos.append(FullTextSearchObject(self.project,
-                                                'source', base_path,
-                                                repos.resource,
-                                                action='DELETE'))
-            elif change == Changeset.DELETE:
-                sos.append(FullTextSearchObject(self.project,
-                                                'source', path,
-                                                repos.resource,
-                                                action='DELETE'))
-            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
-                          Changeset.MOVE):
-                node = repos.get_node(path, changeset.rev)
-                sos.append(self._fill_so(changeset, node))
-        for so in sos:
-            self.log.debug("Indexing: %s", so.title)
-        self.backend.add(sos, quiet=True)
+        # Index the file contents of this revision, a changeset can involve
+        # thousands of files - so submit in batches to avoid exceeding the
+        # available file handles
+        sos = (so for so in self._changes(repos, changeset))
+        for chunk in grouper(sos, 25):
+            self.backend.add(chunk, quiet=True)
+            self.log.debug("Indexed %i repository changes at revision %i",
+                           len(chunk), changeset.rev)
 
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
