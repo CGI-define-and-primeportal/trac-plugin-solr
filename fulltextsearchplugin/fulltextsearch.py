@@ -179,8 +179,16 @@ class Backend(Queue):
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
                 if hasattr(item.body, 'read'):
-                    s.add(item, extract=True, override_title=item.title,
-                          override_author=item.author)
+                    try:
+                        s.add(item, extract=True, override_title=item.title,
+                              override_author=item.author, filename=item.id)
+                    except sunburnt.SolrError, e:
+                        response, content = e.args
+                        if response.status == 500:
+                            self.log.error("Solr encountered an internal server "
+                                           "error indexing '%s'. Received the "
+                                           "response: %s",
+                                           item, content)
                 else:
                     s.add(item) #We can add multiple documents if we want
             elif item.action == 'DELETE':
