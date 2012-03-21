@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import re
 import sunburnt
+from sunburnt.sunburnt import grouper
 import types
 
 from trac.env import IEnvironmentSetupParticipant
@@ -62,6 +63,8 @@ class FullTextSearchModule(Component):
     pass
 
 class FullTextSearchObject(object):
+    '''Minimal behaviour class to store documents going to/comping from Solr.
+    '''
     def __init__(self, project, realm, id=None,
                  parent_realm=None, parent_id=None,
                  title=None, author=None, changed=None, created=None,
@@ -178,8 +181,16 @@ class Backend(Queue):
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
                 if hasattr(item.body, 'read'):
-                    s.add(item, extract=True, override_title=item.title,
-                          override_author=item.author)
+                    try:
+                        s.add(item, extract=True, override_title=item.title,
+                              override_author=item.author, filename=item.id)
+                    except sunburnt.SolrError, e:
+                        response, content = e.args
+                        if response.status == 500:
+                            self.log.error("Solr encountered an internal server "
+                                           "error indexing '%s'. Received the "
+                                           "response: %s",
+                                           item, content)
                 else:
                     s.add(item) #We can add multiple documents if we want
             elif item.action == 'DELETE':
@@ -265,8 +276,8 @@ class FullTextSearch(Component):
         
         realm       Trac realm to which items in resources belong
         resources   Iterable of Trac resources e.g. WikiPage, Attachment
-        check_cb    Callable that accepts a resource, returns True if it needs
-                    to be indexed
+        check_cb    Callable that accepts a resource & status,
+                    returns True if it needs to be indexed
         index_cb    Callable that accepts a resource, indexes it
         feedback_cb Callable that accepts a realm & resource argument
         finish_cb   Callable that accepts a realm & resource argument. The
@@ -274,7 +285,7 @@ class FullTextSearch(Component):
         """
         i = -1
         resource = None
-        resources = (r for r in resources if check_cb(r))
+        resources = (r for r in resources if check_cb(r, self._get_status(r)))
         for i, resource in enumerate(resources):
             index_cb(resource)
             feedback_cb(realm, resource)
@@ -293,8 +304,8 @@ class FullTextSearch(Component):
                 if rev is None:
                     return
                 yield rev
-        def check(changeset):
-            return changeset.date > to_datetime(self._get_status(changeset))
+        def check(changeset, status):
+            return status is None or changeset.date > to_datetime(int(status))
         resources = (repo.get_changeset(rev) for rev in all_revs())
         index = partial(self.changeset_added, repo)
         return self._index(realm, resources, check, index, feedback, finish_fb)
@@ -303,8 +314,8 @@ class FullTextSearch(Component):
         self._set_status(changeset, to_utimestamp(changeset.date))
 
     def _reindex_wiki(self, realm, feedback, finish_fb):
-        def check(page):
-            return page.time > to_datetime(self._get_status(page))
+        def check(page, status):
+            return status is None or page.time > to_datetime(int(status))
         resources = (WikiPage(self.env, name)
                      for name in WikiSystem(self.env).get_pages())
         index = self.wiki_page_added
@@ -350,8 +361,9 @@ class FullTextSearch(Component):
             attachment = Attachment(self.env, parent_realm, parent_id)
             attachment._from_database(*row[2:])
             return attachment
-        def check(attachment):
-            return attachment.date > to_datetime(self._get_status(attachment))
+        def check(attachment, status):
+            return (status is None
+                    or attachment.date > to_datetime(int(status)))
         resources = (att(row) for row in cursor)
         index = self.attachment_added
         return self._index(realm, resources, check, index, feedback, finish_fb)
@@ -363,9 +375,9 @@ class FullTextSearch(Component):
         db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT id FROM ticket")
-        def check(ticket):
-            status = self._get_status(ticket)
-            return ticket.values['changetime'] > to_datetime(status)
+        def check(ticket, status):
+            return (status is None
+                    or ticket.values['changetime'] > to_datetime(int(status)))
         resources = (Ticket(self.env, tkt_id) for (tkt_id,) in cursor)
         index = self.ticket_created
         return self._index(realm, resources, check, index, feedback, finish_fb)
@@ -375,7 +387,7 @@ class FullTextSearch(Component):
 
     def _reindex_milestone(self, realm, feedback, finish_fb):
         resources = Milestone.select(self.env)
-        def check(milestone):
+        def check(milestone, check):
             return True
         index = self.milestone_created
         return self._index(realm, resources, check, index, feedback, finish_fb)
@@ -449,13 +461,17 @@ class FullTextSearch(Component):
 
     # Index status helpers
     def _get_status(self, resource):
-        '''Return the index status of a resource'''
+        '''Return index status of `resource`, or None if nothing is recorded.
+        '''
         db = self.env.get_read_db()
         cursor = db.cursor()
         cursor.execute("SELECT value FROM system WHERE name = %s",
                        (self._status_id(resource),))
         row = cursor.fetchone()
-        return int(row and row[0] or 0)
+        if row:
+            return row[0]
+        else:
+            return None
 
     def _set_status(self, resource, status):
         '''Save the index status of a resource'''
@@ -655,6 +671,19 @@ class FullTextSearch(Component):
             so.body = node.get_content()
         return so
 
+    def _changes(self, repos, changeset):
+        for path, kind, change, base_path, base_rev in changeset.get_changes():
+            if change == Changeset.MOVE:
+                yield FullTextSearchObject(self.project, 'source', base_path,
+                                           repos.resource, action='DELETE')
+            elif change == Changeset.DELETE:
+                yield FullTextSearchObject(self.project, 'source', path,
+                                           repos.resource, action='DELETE')
+            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
+                          Changeset.MOVE):
+                node = repos.get_node(path, changeset.rev)
+                yield self._fill_so(changeset, node)
+
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
@@ -672,27 +701,14 @@ class FullTextSearch(Component):
         self.backend.create(so, quiet=True)
         self._update_changeset(changeset)
 
-        # Index the file contents of the repository
-        sos = []
-        for path, kind, change, base_path, base_rev in changeset.get_changes():
-            #FIXME handle kind == Node.DIRECTORY
-            if change == Changeset.MOVE:
-                sos.append(FullTextSearchObject(self.project,
-                                                'source', base_path,
-                                                repos.resource,
-                                                action='DELETE'))
-            elif change == Changeset.DELETE:
-                sos.append(FullTextSearchObject(self.project,
-                                                'source', path,
-                                                repos.resource,
-                                                action='DELETE'))
-            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
-                          Changeset.MOVE):
-                node = repos.get_node(path, changeset.rev)
-                sos.append(self._fill_so(changeset, node))
-        for so in sos:
-            self.log.debug("Indexing: %s", so.title)
-        self.backend.add(sos, quiet=True)
+        # Index the file contents of this revision, a changeset can involve
+        # thousands of files - so submit in batches to avoid exceeding the
+        # available file handles
+        sos = (so for so in self._changes(repos, changeset))
+        for chunk in grouper(sos, 25):
+            self.backend.add(chunk, quiet=True)
+            self.log.debug("Indexed %i repository changes at revision %i",
+                           len(chunk), changeset.rev)
 
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.

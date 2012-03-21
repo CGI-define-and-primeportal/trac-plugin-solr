@@ -513,6 +513,27 @@
    <field name="body_rev"   type="text_general_rev" indexed="true" stored="false" multiValued="true"/>
    <field name="comments"   type="text_general" indexed="true" stored="true" multiValued="true"/>
    <field name="timestamp"  type="date"         indexed="true" stored="true" default="NOW"/>
+
+   <!-- Dublin Core terms, mapped from ExtractingRequestHandler
+     The DC schema allows any field to be omitted or repeated so declare them multiValued="true".
+     required="false" is the default.
+   -->
+   <field name="dc_contributor" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_coverage" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_creator" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_date"    type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_description" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_format"  type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_identifier" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_language" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_publisher" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_relation" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_rights"  type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_source"  type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_subject" type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_title"   type="text_general" indexed="true" stored="true" multiValued="true"/>
+   <field name="dc_type"    type="text_general" indexed="true" stored="true" multiValued="true"/>
+
    <dynamicField name="ignored_*" type="ignored"/>
  </fields>
 
