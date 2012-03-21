@@ -947,9 +947,44 @@
       <str name="fmap.title">dc_title</str>
       <str name="fmap.type">dc_type</str>
 
+      <str name="fmap.doc_id">ignored_doc_id</str>
+      <str name="fmap.project">ignored_project</str>
+      <str name="fmap.realm">ignored_realm</str>
+      <str name="fmap.id">ignored_id</str>
+      <str name="fmap.parent_realm">ignored_parent_realm</str>
+      <str name="fmap.parent_id">ignored_parent_id</str>
+      <str name="fmap.title">ignored_title</str>
       <str name="fmap.author">ignored_author</str>
+      <str name="fmap.changed">ignored_changed</str>
+      <str name="fmap.created">ignored_created</str>
+      <str name="fmap.oneline">ignored_oneline</str>
+      <str name="fmap.tags">ignored_tags</str>
+      <str name="fmap.involved">ignored_involved</str>
+      <str name="fmap.popularity">ignored_popularity</str>
+      <str name="fmap.body">ignored_body</str>
+      <str name="fmap.body_rev">ignored_body_rev</str>
+      <str name="fmap.comments">ignored_comments</str>
+      <str name="fmap.timestamp">ignored_timestamp</str>
+
+      <str name="fmap.override_doc_id">doc_id</str>
+      <str name="fmap.override_project">project</str>
+      <str name="fmap.override_realm">realm</str>
+      <str name="fmap.override_id">id</str>
+      <str name="fmap.override_parent_realm">parent_realm</str>
+      <str name="fmap.override_parent_id">parent_id</str>
       <str name="fmap.override_title">title</str>
       <str name="fmap.override_author">author</str>
+      <str name="fmap.override_changed">changed</str>
+      <str name="fmap.override_created">created</str>
+      <str name="fmap.override_oneline">oneline</str>
+      <str name="fmap.override_tags">tags</str>
+      <str name="fmap.override_involved">involved</str>
+      <str name="fmap.override_popularity">popularity</str>
+      <str name="fmap.override_body">body</str>
+      <str name="fmap.override_body_rev">body_rev</str>
+      <str name="fmap.override_comments">comments</str>
+      <str name="fmap.override_timestamp">timestamp</str>
+
       <str name="uprefix">ignored_</str>
     </lst>
   </requestHandler>
