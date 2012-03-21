@@ -182,8 +182,7 @@ class Backend(Queue):
             if item.action in ('CREATE', 'MODIFY'):
                 if hasattr(item.body, 'read'):
                     try:
-                        s.add(item, extract=True, override_title=item.title,
-                              override_author=item.author, filename=item.id)
+                        s.add(item, extract=True, filename=item.id)
                     except sunburnt.SolrError, e:
                         response, content = e.args
                         if response.status == 500:
