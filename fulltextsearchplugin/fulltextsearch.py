@@ -1,6 +1,7 @@
 from Queue import Queue
 import os
 from datetime import datetime
+import operator
 import re
 import sunburnt
 from sunburnt.sunburnt import grouper
@@ -162,10 +163,13 @@ class Backend(Queue):
         
     def remove(self, project_id, realms=None):
         s = self.si_class(self.solr_endpoint)
+        Q = s.query().Q
         realms = realms or []
+        query = reduce(operator.and_,
+                       [Q(u'realm:%s' % realm) for realm in realms],
+                       Q(u'project:%s' % project_id))
         # I would have like some more info back
-        s.delete(queries=[u"project:%s" % project_id] +
-                         [u"realm:%s" % realm for realm in realms])
+        s.delete(queries=[query])
         s.commit()
 
     def commit(self, quiet=False):
