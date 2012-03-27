@@ -1,6 +1,7 @@
 from Queue import Queue
 import os
 from datetime import datetime
+import operator
 import re
 import sunburnt
 from sunburnt.sunburnt import grouper
@@ -161,11 +162,19 @@ class Backend(Queue):
         self.commit(quiet=quiet)
         
     def remove(self, project_id, realms=None):
+        '''Delete docs from index where project=project_id AND realm in realms
+
+        If realms is not specified then delete all documents in project_id.
+        '''
         s = self.si_class(self.solr_endpoint)
-        realms = realms or []
+        Q = s.query().Q
+        q = s.query(u'project:%s' % project_id)
+        if realms:
+            query = q.query(reduce(operator.or_,
+                                   [Q(u'realm:%s' % realm)
+                                    for realm in realms]))
         # I would have like some more info back
-        s.delete(queries=[u"project:%s" % project_id] +
-                         [u"realm:%s" % realm for realm in realms])
+        s.delete(queries=[query])
         s.commit()
 
     def commit(self, quiet=False):
