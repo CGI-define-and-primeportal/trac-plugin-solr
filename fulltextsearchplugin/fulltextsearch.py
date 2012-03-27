@@ -162,12 +162,17 @@ class Backend(Queue):
         self.commit(quiet=quiet)
         
     def remove(self, project_id, realms=None):
+        '''Delete docs from index where project=project_id AND realm in realms
+
+        If realms is not specified then delete all documents in project_id.
+        '''
         s = self.si_class(self.solr_endpoint)
         Q = s.query().Q
-        realms = realms or []
-        query = reduce(operator.and_,
-                       [Q(u'realm:%s' % realm) for realm in realms],
-                       Q(u'project:%s' % project_id))
+        q = s.query(u'project:%s' % project_id)
+        if realms:
+            query = q.query(reduce(operator.or_,
+                                   [Q(u'realm:%s' % realm)
+                                    for realm in realms]))
         # I would have like some more info back
         s.delete(queries=[query])
         s.commit()
