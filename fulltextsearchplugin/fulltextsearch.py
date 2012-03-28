@@ -557,7 +557,7 @@ class FullTextSearch(Component):
         self.backend.delete(so, quiet=True)
         self._update_wiki(page)
 
-    def wiki_page_version_deleted(self, page, version, author):
+    def wiki_page_version_deleted(self, page):
         #We don't care about old versions
         pass
 
