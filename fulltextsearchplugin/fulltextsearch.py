@@ -622,8 +622,12 @@ class FullTextSearch(Component):
                 self.log.warning('Missing attachment file "%s" encountered '
                                  'whilst indexing full text search', 
                                  attachment)
-        self.backend.create(so, quiet=True)
-        self._update_attachment(attachment)
+        try:
+            self.backend.create(so, quiet=True)
+            self._update_attachment(attachment)
+        finally:
+            if hasattr(so.body, 'close'):
+                so.body.close()
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
@@ -714,9 +718,14 @@ class FullTextSearch(Component):
         # available file handles
         sos = (so for so in self._changes(repos, changeset))
         for chunk in grouper(sos, 25):
-            self.backend.add(chunk, quiet=True)
-            self.log.debug("Indexed %i repository changes at revision %i",
-                           len(chunk), changeset.rev)
+            try:
+                self.backend.add(chunk, quiet=True)
+                self.log.debug("Indexed %i repository changes at revision %i",
+                               len(chunk), changeset.rev)
+            finally:
+                for so in chunk:
+                    if hasattr(so.body, 'close'):
+                        so.body.close()
 
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
