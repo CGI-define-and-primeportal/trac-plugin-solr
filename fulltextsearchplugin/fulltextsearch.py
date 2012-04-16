@@ -738,8 +738,9 @@ class FullTextSearch(Component):
     # ISearchSource methods.
 
     def get_search_filters(self, req):
-        return [(name, label, enabled) for name, label, enabled, indexer 
-                                       in self._realms]
+        return [(name, label, enabled)
+                for name, label, enabled, indexer in self._realms
+                if name in self.search_realms]
 
     def get_search_results(self, req, terms, filters):
         self.log.debug("get_search_result called")
