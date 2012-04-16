@@ -743,7 +743,6 @@ class FullTextSearch(Component):
                 if name in self.search_realms]
 
     def get_search_results(self, req, terms, filters):
-        self.log.debug("get_search_result called")
         try:
             query, response = self._do_search(terms, filters)
         except:
