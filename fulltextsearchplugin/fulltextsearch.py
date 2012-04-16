@@ -841,7 +841,11 @@ class FullTextSearch(Component):
         # Based on SearchModule._do_search()
         results = []
         for name in self.env.config.getlist('search', 'disabled_sources'):
-            source = self._fallbacks[name](self.env)
+            try:
+                source_class = self._fallbacks[name]
+            except KeyError:
+                continue
+            source = source_class(self.env)
             results.extend(source.get_search_results(req, terms, filters)
                            or [])
         return results
