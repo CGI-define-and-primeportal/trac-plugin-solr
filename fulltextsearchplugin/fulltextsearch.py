@@ -743,6 +743,9 @@ class FullTextSearch(Component):
                 if name in self.search_realms]
 
     def get_search_results(self, req, terms, filters):
+        filters = self._check_filters(filters)
+        if not filters:
+            return []
         try:
             query, response = self._do_search(terms, filters)
         except:
@@ -756,6 +759,11 @@ class FullTextSearch(Component):
             excerpt = doc.oneline or ''
             return (href, title, changed, author, excerpt)
         return [_result(doc) for doc in docs]
+
+    def _check_filters(self, filters):
+        """Return only the filters currently enabled for search.
+        """
+        return [f for f in filters if f in self.search_realms]
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
