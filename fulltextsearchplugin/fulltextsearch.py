@@ -269,7 +269,6 @@ class FullTextSearch(Component):
             'WikiModule': WikiModule,
             'MilestoneModule': MilestoneModule,
             'ChangesetModule': ChangesetModule,
-            'AttachmentModule': AttachmentModule,
             }
 
     @property
