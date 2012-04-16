@@ -748,7 +748,9 @@ class FullTextSearch(Component):
             return []
         try:
             query, response = self._do_search(terms, filters)
-        except:
+        except Exception, e:
+            self.log.error("Couldn't perform Full text search, falling back "
+                           "to built-in search sources: %s", e)
             return self._do_fallback(req, terms, filters)
         docs = (FullTextSearchObject(**doc) for doc in self._docs(query))
         def _result(doc):
@@ -834,7 +836,6 @@ class FullTextSearch(Component):
             i += page_size
 
     def _do_fallback(self, req, terms, filters):
-        self.log.warning("Falling back to Trac internal search")
         add_warning(req, _("Full text search is unavailable, some search "
                            "results may be missing"))
         # Based on SearchModule._do_search()
