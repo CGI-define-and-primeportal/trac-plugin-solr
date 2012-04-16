@@ -194,11 +194,10 @@ class Backend(Queue):
                         s.add(item, extract=True, filename=item.id)
                     except sunburnt.SolrError, e:
                         response, content = e.args
-                        if response.status == 500:
-                            self.log.error("Solr encountered an internal server "
-                                           "error indexing '%s'. Received the "
-                                           "response: %s",
-                                           item, content)
+                        self.log.error("Encountered a Solr error "
+                                       "indexing '%s'. "
+                                       "Solr returned: %s %s",
+                                       item, response, content)
                 else:
                     s.add(item) #We can add multiple documents if we want
             elif item.action == 'DELETE':
