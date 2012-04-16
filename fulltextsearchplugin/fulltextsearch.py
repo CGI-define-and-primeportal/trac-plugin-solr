@@ -269,7 +269,6 @@ class FullTextSearch(Component):
             'WikiModule': WikiModule,
             'MilestoneModule': MilestoneModule,
             'ChangesetModule': ChangesetModule,
-            'AttachmentModule': AttachmentModule,
             }
 
     @property
@@ -739,14 +738,19 @@ class FullTextSearch(Component):
     # ISearchSource methods.
 
     def get_search_filters(self, req):
-        return [(name, label, enabled) for name, label, enabled, indexer 
-                                       in self._realms]
+        return [(name, label, enabled)
+                for name, label, enabled, indexer in self._realms
+                if name in self.search_realms]
 
     def get_search_results(self, req, terms, filters):
-        self.log.debug("get_search_result called")
+        filters = self._check_filters(filters)
+        if not filters:
+            return []
         try:
             query, response = self._do_search(terms, filters)
-        except:
+        except Exception, e:
+            self.log.error("Couldn't perform Full text search, falling back "
+                           "to built-in search sources: %s", e)
             return self._do_fallback(req, terms, filters)
         docs = (FullTextSearchObject(**doc) for doc in self._docs(query))
         def _result(doc):
@@ -757,6 +761,11 @@ class FullTextSearch(Component):
             excerpt = doc.oneline or ''
             return (href, title, changed, author, excerpt)
         return [_result(doc) for doc in docs]
+
+    def _check_filters(self, filters):
+        """Return only the filters currently enabled for search.
+        """
+        return [f for f in filters if f in self.search_realms]
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
@@ -827,13 +836,16 @@ class FullTextSearch(Component):
             i += page_size
 
     def _do_fallback(self, req, terms, filters):
-        self.log.warning("Falling back to Trac internal search")
         add_warning(req, _("Full text search is unavailable, some search "
                            "results may be missing"))
         # Based on SearchModule._do_search()
         results = []
         for name in self.env.config.getlist('search', 'disabled_sources'):
-            source = self._fallbacks[name](self.env)
+            try:
+                source_class = self._fallbacks[name]
+            except KeyError:
+                continue
+            source = source_class(self.env)
             results.extend(source.get_search_results(req, terms, filters)
                            or [])
         return results
