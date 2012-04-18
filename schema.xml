@@ -546,7 +546,11 @@
  <defaultSearchField>body_rev</defaultSearchField>
 
  <!-- SolrQueryParser configuration: defaultOperator="AND|OR" -->
- <solrQueryParser defaultOperator="OR"/>
+ <!-- This behaviour is better configured in solrconfig.xml using q.op
+      http://wiki.apache.org/solr/SchemaXml#Default_query_parser_operator
+      http://wiki.apache.org/solr/ExtendedDisMax#mm_.28Minimum_.27Should.27_Match.29
+      -->
+ <!-- solrQueryParser defaultOperator="OR"/-->
 
   <!-- copyField commands copy one field to another at the time a document
         is added to the index.  It's used either to index the same field differently,
