@@ -562,7 +562,7 @@ class FullTextSearch(Component):
     def wiki_page_renamed(self, page, old_name): 
         so = FullTextSearchObject(self.project, page.resource.realm, old_name)
         self.backend.delete(so, quiet=True)
-        self.wiki_page.added(page)
+        self.wiki_page_added(page)
 
     def _page_tags(self, realm, page):
         db = self.env.get_read_db()
