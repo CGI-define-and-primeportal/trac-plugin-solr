@@ -129,10 +129,17 @@ class FullTextSearchObject(object):
 
 
 class Backend(Queue):
-    """
+    """In process queue for submitting documents to Apache Solr
     """
 
     def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface):
+        """Initialize an empty queue.
+
+        solr_endpoint -- URL of the Solr instance
+        log -- stdlib Logger object
+        si_class -- Class which will be instantiated to communicate with Solr.
+            Must match the signature of sunburnt.SolrInterface.
+        """
         Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
@@ -141,17 +148,17 @@ class Backend(Queue):
     def create(self, item, quiet=False):
         item.action = 'CREATE'
         self.put(item)
-        self.commit(quiet=quiet)
+        return self.commit(quiet=quiet)
         
     def modify(self, item, quiet=False):
         item.action = 'MODIFY'
         self.put(item)
-        self.commit(quiet=quiet)
+        return self.commit(quiet=quiet)
     
     def delete(self, item, quiet=False):
         item.action = 'DELETE'
         self.put(item)
-        self.commit(quiet=quiet)
+        return self.commit(quiet=quiet)
 
     def add(self, item, quiet=False):
         if isinstance(item, list):
@@ -159,7 +166,7 @@ class Backend(Queue):
                 self.put(i)
         else:
             self.put(item)
-        self.commit(quiet=quiet)
+        return self.commit(quiet=quiet)
         
     def remove(self, project_id, realms=None):
         '''Delete docs from index where project=project_id AND realm in realms
@@ -178,9 +185,20 @@ class Backend(Queue):
         s.commit()
 
     def commit(self, quiet=False):
+        """Send items in the queue to Solr and commit them, return True on
+        success.
+
+        Success is defined as no exceptions being encountered whilst
+        communicating with Solr. The return value is intended to indicate that
+        all queued items have been indexed.
+        If `quiet` is specified then exceptions are surpressed, but still
+        counted for purposes of the return value.
+        """
+        errors = 0
         try:
             s = self.si_class(self.solr_endpoint)
         except Exception, e:
+            errors += 1
             if quiet:
                 self.log.error("Could not commit to Solr due to: %s", e)
                 return
@@ -189,20 +207,21 @@ class Backend(Queue):
         while not self.empty():
             item = self.get()
             if item.action in ('CREATE', 'MODIFY'):
-                if hasattr(item.body, 'read'):
-                    try:
+                try:
+                    if hasattr(item.body, 'read'):
                         s.add(item, extract=True, filename=item.id)
-                    except sunburnt.SolrError, e:
-                        response, content = e.args
-                        self.log.error("Encountered a Solr error "
-                                       "indexing '%s'. "
-                                       "Solr returned: %s %s",
-                                       item, response, content)
-                else:
-                    s.add(item) #We can add multiple documents if we want
+                    else:
+                        s.add(item)
+                except sunburnt.SolrError, e:
+                    errors += 1
+                    response, content = e.args
+                    self.log.error("Encountered a Solr error indexing '%s'. "
+                                   "Solr returned: %s %s",
+                                   item, response, content)
             elif item.action == 'DELETE':
                 s.delete(item)
             else:
+                errors += 1
                 if quiet:
                     self.log.error("Unknown Solr action %s on %s",
                                    item.action, item)
@@ -212,9 +231,11 @@ class Backend(Queue):
             try:
                 s.commit()
             except Exception, e:
+                errors += 1
                 self.log.exception('%s %r', item, item)
                 if not quiet:
                     raise
+            return errors == 0
 
     def optimize(self):
         s = self.si_class(self.solr_endpoint)
@@ -514,8 +535,9 @@ class FullTextSearch(Component):
                 body = u'%r' % (ticket.values,),
                 comments = [t[4] for t in ticket.get_changelog()],
                 )
-        self.backend.create(so, quiet=True)
-        self._update_ticket(ticket)
+        success = self.backend.create(so, quiet=True)
+        if success:
+            self._update_ticket(ticket)
         self.log.debug("Ticket added for indexing: %s", ticket)
         
     def ticket_changed(self, ticket, comment, author, old_values):
@@ -523,8 +545,9 @@ class FullTextSearch(Component):
 
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self.project, ticket.resource)
-        self.backend.delete(so, quiet=True)
-        self._update_ticket(ticket)
+        success = self.backend.delete(so, quiet=True)
+        if success:
+            self._update_ticket(ticket)
         self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
@@ -543,8 +566,9 @@ class FullTextSearch(Component):
                 body = page.text,
                 comments = [r[3] for r in history],
                 )
-        self.backend.create(so, quiet=True)
-        self._update_wiki(page)
+        success = self.backend.create(so, quiet=True)
+        if success:
+            self._update_wiki(page)
         self.log.debug("WikiPage created for indexing: %s", page.name)
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
@@ -552,8 +576,9 @@ class FullTextSearch(Component):
 
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self.project, page.resource)
-        self.backend.delete(so, quiet=True)
-        self._update_wiki(page)
+        success = self.backend.delete(so, quiet=True)
+        if success:
+            self._update_wiki(page)
 
     def wiki_page_version_deleted(self, page):
         #We don't care about old versions
@@ -561,8 +586,9 @@ class FullTextSearch(Component):
 
     def wiki_page_renamed(self, page, old_name): 
         so = FullTextSearchObject(self.project, page.resource.realm, old_name)
-        self.backend.delete(so, quiet=True)
-        self.wiki_page_added(page)
+        success = self.backend.delete(so, quiet=True)
+        if success:
+            self.wiki_page_added(page)
 
     def _page_tags(self, realm, page):
         db = self.env.get_read_db()
@@ -621,8 +647,9 @@ class FullTextSearch(Component):
                                  'whilst indexing full text search', 
                                  attachment)
         try:
-            self.backend.create(so, quiet=True)
-            self._update_attachment(attachment)
+            success = self.backend.create(so, quiet=True)
+            if success:
+                self._update_attachment(attachment)
         finally:
             if hasattr(so.body, 'close'):
                 so.body.close()
@@ -630,8 +657,9 @@ class FullTextSearch(Component):
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
         so = FullTextSearchObject(self.project, attachment.resource)
-        self.backend.delete(so, quiet=True)
-        self._update_attachment(attachment)
+        success = self.backend.delete(so, quiet=True)
+        if success:
+            self._update_attachment(attachment)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
@@ -708,8 +736,9 @@ class FullTextSearch(Component):
                 created=changeset.date,
                 changed=changeset.date,
                 )
-        self.backend.create(so, quiet=True)
-        self._update_changeset(changeset)
+        success = self.backend.create(so, quiet=True)
+        if success:
+            self._update_changeset(changeset)
 
         # Index the file contents of this revision, a changeset can involve
         # thousands of files - so submit in batches to avoid exceeding the
@@ -749,8 +778,8 @@ class FullTextSearch(Component):
         try:
             query, response = self._do_search(terms, filters)
         except Exception, e:
-            self.log.error("Couldn't perform Full text search, falling back "
-                           "to built-in search sources: %s", e)
+            self.log.exception("Couldn't perform Full text search, falling back "
+                           "to built-in search sources: %s %s", type(e), repr(e))
             return self._do_fallback(req, terms, filters)
         docs = (FullTextSearchObject(**doc) for doc in self._docs(query))
         def _result(doc):
