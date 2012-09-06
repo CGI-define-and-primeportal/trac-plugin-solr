@@ -26,6 +26,7 @@ from trac.resource import (get_resource_shortname, get_resource_url,
                            Resource, ResourceNotFound)
 from trac.search import ISearchSource, shorten_result
 from trac.util.translation import _
+from trac.config import BoolOption
 from trac.config import IntOption
 from trac.config import ListOption
 from trac.config import Option
@@ -268,6 +269,11 @@ class FullTextSearch(Component):
 
     max_size = IntOption("search", "max_size", 10*2**20, # 10 MB
         doc="""Maximum document size (in bytes) to indexed.
+        """)
+
+    fulltext_index_svn_nodes = BoolOption("search", "fulltext_index_svn_nodes",
+        default=False,
+        doc="""Whether to index file contents and filenames within changesets
         """)
 
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
@@ -739,6 +745,9 @@ class FullTextSearch(Component):
         success = self.backend.create(so, quiet=True)
         if success:
             self._update_changeset(changeset)
+
+        if not self.fulltext_index_svn_nodes:
+            return
 
         # Index the file contents of this revision, a changeset can involve
         # thousands of files - so submit in batches to avoid exceeding the
