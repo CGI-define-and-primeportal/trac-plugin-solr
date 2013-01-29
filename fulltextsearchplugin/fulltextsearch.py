@@ -283,7 +283,7 @@ class FullTextSearch(Component):
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
-            (u'wiki',       u'Wiki',         True, self._reindex_wiki,       ['WIKI_VIEW']),
+            (u'wiki',       u'Wiki',         True, self._reindex_wiki,       'WIKI_VIEW'),
             (u'milestone',  u'Milestones',   True, self._reindex_milestone,  'MILESTONE_VIEW'),
             (u'changeset',  u'Changesets',   True, self._reindex_changeset,  None),
             (u'source',     u'File archive', True, None,                     None),
