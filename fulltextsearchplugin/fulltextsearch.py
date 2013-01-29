@@ -282,20 +282,26 @@ class FullTextSearch(Component):
         self.backend = Backend(self.solr_endpoint, self.log)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
-            (u'ticket',     u'Tickets',      True, self._reindex_ticket,     ['TICKET_VIEW']),
+            (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
             (u'wiki',       u'Wiki',         True, self._reindex_wiki,       ['WIKI_VIEW']),
             (u'milestone',  u'Milestones',   True, self._reindex_milestone,  ['MILESTONE_VIEW']),
-            (u'changeset',  u'Changesets',   True, self._reindex_changeset,  []),
-            (u'source',     u'File archive', True, None,                     []),
-            (u'attachment', u'Attachments',  True, self._reindex_attachment, []),
+            (u'changeset',  u'Changesets',   True, self._reindex_changeset,  None),
+            (u'source',     u'File archive', True, None,                     None),
+            (u'attachment', u'Attachments',  True, self._reindex_attachment, None),
             ]
 
         self._indexers = dict((name, indexer)
-                              for name, label, enabled, indexer, permissions
+                              for name, label, enabled, indexer, permission
                               in self._realms if indexer)
-        self._required_permissions = dict((name, permissions)
-                                 for name, label, enabled, indexer, permissions
+        self._required_permission = dict((name, permission)
+                                 for name, label, enabled, indexer, permission
                                  in self._realms)
+
+        # Temporary code to postpone rollback of [9032] and [9033]
+        for k, v in self._required_permission.iteritems():
+            if type(v) == list:
+                self._required_permission[k] = v[0]
+
         self._fallbacks = {
             'TicketModule': TicketModule,
             'WikiModule': WikiModule,
@@ -322,7 +328,7 @@ class FullTextSearch(Component):
 
     @property
     def index_realms(self):
-        return [name for name, label, enabled, indexer, permissions
+        return [name for name, label, enabled, indexer, permission
                      in self._realms if indexer]
 
     def _index(self, realm, resources, check_cb, index_cb,
@@ -799,12 +805,12 @@ class FullTextSearch(Component):
 
     def get_search_filters(self, req):
         return [(name, label, enabled)
-                for name, label, enabled, indexer, permissions in self._realms
+                for name, label, enabled, indexer, permission in self._realms
                 if name in self._allowed_realms(req, self.search_realms)]
 
     def get_search_results(self, req, terms, filters):
         filters = self._check_filters(filters)
-        # disable filters not allowed by the users permissions
+        # disable filters not allowed by the users permission
         filters = list(self._allowed_realms(req, filters))
         if not filters:
             return []
@@ -832,14 +838,8 @@ class FullTextSearch(Component):
     def _allowed_realms(self, req, filters):
         """Yield only the realms the user is allowed to search
         """
-        for filter_ in filters:
-            for perm in self._required_permissions[filter_]:
-                if perm not in req.perm:
-                    # user lacks required permission
-                    break
-            else:
-                # user fulfills all permission requirements
-                yield filter_
+        return (f for f in filters if not self._required_permission[f]
+                or self._required_permission[f] in req.perm)
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
