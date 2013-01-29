@@ -297,11 +297,6 @@ class FullTextSearch(Component):
                                  for name, label, enabled, indexer, permission
                                  in self._realms)
 
-        # Temporary code to postpone rollback of [9032] and [9033]
-        for k, v in self._required_permission.iteritems():
-            if type(v) == list:
-                self._required_permission[k] = v[0]
-
         self._fallbacks = {
             'TicketModule': TicketModule,
             'WikiModule': WikiModule,
