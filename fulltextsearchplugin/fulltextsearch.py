@@ -823,7 +823,16 @@ class FullTextSearch(Component):
             author = ", ".join(doc.author or [])
             excerpt = doc.oneline or ''
             return (href, title, changed, author, excerpt)
-        return [_result(doc) for doc in docs]
+
+        def has_permission(doc):
+            """Checks if the user is allowed to see a given search result
+            """
+            req_perm = self._required_permission[doc.resource.realm]
+            if not req_perm:
+                return True
+            return req.perm.has_permission(req_perm, doc.resource)
+
+        return [_result(doc) for doc in docs if has_permission(doc)]
 
     def _check_filters(self, filters):
         """Return only the filters currently enabled for search.
