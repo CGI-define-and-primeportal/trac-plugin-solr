@@ -282,15 +282,21 @@ class FullTextSearch(Component):
         self.backend = Backend(self.solr_endpoint, self.log)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
-            (u'ticket',     u'Tickets',     True,   self._reindex_ticket),
-            (u'wiki',       u'Wiki',        True,   self._reindex_wiki),
-            (u'milestone',  u'Milestones',  True,   self._reindex_milestone),
-            (u'changeset',  u'Changesets',  True,   self._reindex_changeset),
-            (u'source',     u'File archive', True,  None),
-            (u'attachment', u'Attachments', True,   self._reindex_attachment),
+            (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
+            (u'wiki',       u'Wiki',         True, self._reindex_wiki,       None),
+            (u'milestone',  u'Milestones',   True, self._reindex_milestone,  None),
+            (u'changeset',  u'Changesets',   True, self._reindex_changeset,  None),
+            (u'source',     u'File archive', True, None,                     None),
+            (u'attachment', u'Attachments',  True, self._reindex_attachment, None),
             ]
-        self._indexers = dict((name, indexer) for name, label, enabled, indexer
-                                              in self._realms if indexer)
+
+        self._indexers = dict((name, indexer)
+                              for name, label, enabled, indexer, permission
+                              in self._realms if indexer)
+        self._required_permission = dict((name, permission)
+                                 for name, label, enabled, indexer, permission
+                                 in self._realms)
+
         self._fallbacks = {
             'TicketModule': TicketModule,
             'WikiModule': WikiModule,
@@ -298,10 +304,27 @@ class FullTextSearch(Component):
             'ChangesetModule': ChangesetModule,
             }
 
+    def get_available_filters(self, req):
+        """Return a list of filters that are available.
+
+        Each filter is a `(name, label, default)` tuple, where `name` is
+        the internal name, `label` is a human-readable name for display and
+        `default` is a boolean for determining whether this filter is
+        searchable by default.
+
+        This method mirrors
+        trac.search.web_ui.SearchModule.get_available_filters
+        """
+
+        if not 'SEARCH_VIEW' in req.perm:
+            return []
+        return [(f[0], f[1], (len(f) < 3 or len(f) > 2 and f[2]))
+                for f in (self.get_search_filters(req) or [])]
+
     @property
     def index_realms(self):
-        return [name for name, label, enabled, indexer in self._realms
-                     if indexer]
+        return [name for name, label, enabled, indexer, permission
+                     in self._realms if indexer]
 
     def _index(self, realm, resources, check_cb, index_cb,
                feedback_cb, finish_cb):
@@ -777,11 +800,13 @@ class FullTextSearch(Component):
 
     def get_search_filters(self, req):
         return [(name, label, enabled)
-                for name, label, enabled, indexer in self._realms
-                if name in self.search_realms]
+                for name, label, enabled, indexer, permission in self._realms
+                if name in self._allowed_realms(req, self.search_realms)]
 
     def get_search_results(self, req, terms, filters):
         filters = self._check_filters(filters)
+        # disable filters not allowed by the users permission
+        filters = list(self._allowed_realms(req, filters))
         if not filters:
             return []
         try:
@@ -798,12 +823,27 @@ class FullTextSearch(Component):
             author = ", ".join(doc.author or [])
             excerpt = doc.oneline or ''
             return (href, title, changed, author, excerpt)
-        return [_result(doc) for doc in docs]
+
+        def has_permission(doc):
+            """Checks if the user is allowed to see a given search result
+            """
+            req_perm = self._required_permission[doc.resource.realm]
+            if not req_perm:
+                return True
+            return req.perm.has_permission(req_perm, doc.resource)
+
+        return [_result(doc) for doc in docs if has_permission(doc)]
 
     def _check_filters(self, filters):
         """Return only the filters currently enabled for search.
         """
         return [f for f in filters if f in self.search_realms]
+
+    def _allowed_realms(self, req, filters):
+        """Yield only the realms the user is allowed to search
+        """
+        return (f for f in filters if not self._required_permission[f]
+                or self._required_permission[f] in req.perm)
 
     def _build_filter_query(self, si, filters):
         """Return a SOLR filter query that matches any of the chosen filters
