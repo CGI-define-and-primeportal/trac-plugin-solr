@@ -284,7 +284,7 @@ class FullTextSearch(Component):
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
             (u'wiki',       u'Wiki',         True, self._reindex_wiki,       None),
-            (u'milestone',  u'Milestones',   True, self._reindex_milestone,  None),
+            (u'milestone',  u'Milestones',   True, self._reindex_milestone,  'MILESTONE_VIEW'),
             (u'changeset',  u'Changesets',   True, self._reindex_changeset,  None),
             (u'source',     u'File archive', True, None,                     None),
             (u'attachment', u'Attachments',  True, self._reindex_attachment, None),
