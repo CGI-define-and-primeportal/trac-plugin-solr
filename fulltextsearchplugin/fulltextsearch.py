@@ -8,7 +8,8 @@ from sunburnt.sunburnt import grouper
 import types
 
 from trac.env import IEnvironmentSetupParticipant
-from trac.core import Component, implements, Interface, TracError
+from trac.core import Component, implements, Interface, TracError,\
+    ExtensionPoint
 from trac.ticket.api import (ITicketChangeListener, IMilestoneChangeListener,
                              TicketSystem)
 from trac.ticket.model import Ticket, Milestone
@@ -255,6 +256,20 @@ class FullTextSearch(Component):
                IRepositoryChangeListener, ISearchSource,
                IEnvironmentSetupParticipant, IRequireComponents)
 
+    _search_sources = ExtensionPoint(ISearchSource)
+    
+    @property
+    def search_sources(self):
+        return [source for source in self._search_sources
+                if source.__class__.__name__ not in self.disabled_sources]
+
+    disabled_sources = ListOption('search', 'disabled_sources',
+                                  [],
+        doc="""Components that will be skipped as search sources. Used by
+        FullTextSearchPlugin to override sources it has implemented.
+
+        Logica addition.""")
+
     solr_endpoint = Option("search", "solr_endpoint",
                            default="http://localhost:8983/solr/",
                            doc="URL to use for HTTP REST calls to Solr")
@@ -319,7 +334,8 @@ class FullTextSearch(Component):
         if not 'SEARCH_VIEW' in req.perm:
             return []
         return [(f[0], f[1], (len(f) < 3 or len(f) > 2 and f[2]))
-                for f in (self.get_search_filters(req) or [])]
+                for source in self.search_sources
+                for f in (source.get_search_filters(req) or [])]
 
     @property
     def index_realms(self):
