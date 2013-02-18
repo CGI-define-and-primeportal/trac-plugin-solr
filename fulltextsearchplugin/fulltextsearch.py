@@ -304,23 +304,6 @@ class FullTextSearch(Component):
             'ChangesetModule': ChangesetModule,
             }
 
-    def get_available_filters(self, req):
-        """Return a list of filters that are available.
-
-        Each filter is a `(name, label, default)` tuple, where `name` is
-        the internal name, `label` is a human-readable name for display and
-        `default` is a boolean for determining whether this filter is
-        searchable by default.
-
-        This method mirrors
-        trac.search.web_ui.SearchModule.get_available_filters
-        """
-
-        if not 'SEARCH_VIEW' in req.perm:
-            return []
-        return [(f[0], f[1], (len(f) < 3 or len(f) > 2 and f[2]))
-                for f in (self.get_search_filters(req) or [])]
-
     @property
     def index_realms(self):
         return [name for name, label, enabled, indexer, permission
