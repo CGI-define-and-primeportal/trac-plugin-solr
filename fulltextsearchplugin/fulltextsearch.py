@@ -49,7 +49,7 @@ def _do_nothing(*args, **kwargs):
 def _sql_in(seq):
     '''Return '(%s,%s,...%s)' suitable to use in a SQL in clause.
     '''
-    return '(%s)' % ','.join('%s' for x in seq)
+    return '(%s)' % ('%s,' * len(seq))[:-1]
 
 def _res_id(resource):
     if resource.parent:
