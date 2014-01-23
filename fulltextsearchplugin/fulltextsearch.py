@@ -231,14 +231,14 @@ class Backend(Queue):
                 else:
                     raise ValueError("Unknown Solr action %s on %s"
                                      % (item.action, item))
-            try:
-                s.commit()
-            except Exception, e:
-                errors += 1
-                self.log.exception('%s %r', item, item)
-                if not quiet:
-                    raise
-            return errors == 0
+        try:
+            s.commit()
+        except Exception, e:
+            errors += 1
+            self.log.exception('%s %r', item, item)
+            if not quiet:
+                raise
+        return errors == 0
 
     def optimize(self):
         s = self.si_class(self.solr_endpoint)
