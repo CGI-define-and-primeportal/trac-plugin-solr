@@ -1,4 +1,4 @@
-from Queue import Queue
+import Queue
 import os
 from datetime import datetime
 import operator
@@ -131,7 +131,7 @@ class FullTextSearchObject(object):
         return r
 
 
-class Backend(Queue):
+class Backend(Queue.Queue):
     """In process queue for submitting documents to Apache Solr
     """
 
@@ -143,7 +143,7 @@ class Backend(Queue):
         si_class -- Class which will be instantiated to communicate with Solr.
             Must match the signature of sunburnt.SolrInterface.
         """
-        Queue.__init__(self)
+        Queue.Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
@@ -207,8 +207,11 @@ class Backend(Queue):
                 return
             else:
                 raise
-        while not self.empty():
-            item = self.get()
+        while True:
+            try:
+                item = self.get(block=False)
+            except Queue.Empty:
+                break
             if item.action in ('CREATE', 'MODIFY'):
                 try:
                     if hasattr(item.body, 'read'):
