@@ -495,7 +495,7 @@ class FullTextSearch(Component):
 
     # IEnvironmentSetupParticipant methods
     def environment_created(self):
-        self.index()
+        pass
 
     def environment_needs_upgrade(self, db):
         pass
