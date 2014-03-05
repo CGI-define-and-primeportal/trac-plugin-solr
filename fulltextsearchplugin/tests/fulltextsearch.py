@@ -464,7 +464,7 @@ class ChangesetsSvnTestCase(unittest.TestCase):
     
     def test_add_changeset(self):
         sw = SubversionWriter(self.env, self.repos, 'kalle')
-        new_rev = sw.put_content('/trunk/foo.txt', content='Foo Bar', commit_msg='A comment')
+        new_rev = sw.put_content([('/trunk/foo.txt', 'Foo Bar')], commit_msg='A comment')
         RepositoryManager(self.env).notify('changeset_added', '', [new_rev])
         # Node
         so = self._get_so()
