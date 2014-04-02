@@ -38,6 +38,7 @@ from componentdependencies import IRequireComponents
 from tractags.model import TagModelProvider
 
 from fulltextsearchplugin.dates import normalise_datetime
+from trac.perm import PermissionError
 
 __all__ = ['IFullTextSearchSource',
            'FullTextSearchObject', 'Backend', 'FullTextSearch',
@@ -281,6 +282,13 @@ class FullTextSearch(Component):
         doc="""Whether to index file contents and filenames within changesets
         """)
 
+    raise_indexing_errors = BoolOption("search", "raise_indexing_errors",
+        default=False,
+        doc="""Setting this to true will enable raising potential exceptions
+        thrown when indexing different resources. While false these exceptions
+        will be ignored.
+        """)
+
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
@@ -476,12 +484,25 @@ class FullTextSearch(Component):
         summary = {}
         for realm in realms:
             indexer = self._indexers[realm]
-            num_indexed = indexer(realm, feedback, finish_fb)
-            self.log.debug('Indexed %i resources in realm: "%s"',
-                           num_indexed, realm)
-            summary[realm] = num_indexed
+            try:
+                num_indexed = indexer(realm, feedback, finish_fb)
+                self.log.debug('Indexed %i resources in realm: "%s"',
+                               num_indexed, realm)
+                summary[realm] = num_indexed
+            except (TracError, NotImplementedError, ValueError, AttributeError, 
+                    PermissionError), e:
+                # Explicitly catches potential exceptions that can be raised 
+                #when trying to index a realm. Most of them derives from 
+                #TracError, for for example ResourceNotFound.
+                if self.raise_indexing_errors:
+                    raise
+                else:
+                    self.log.warning('Failed to index realm: %s - %s', realm, e)
+                    continue
+
         self.log.info("Completed indexing realms: %s",
-                      ', '.join('%s (%i)' % (r, summary[r]) for r in realms))
+                      ', '.join('%s (%i)' % (r, summary[r]) for r in realms 
+                                if r in summary))
         return summary
 
     def optimize(self):
