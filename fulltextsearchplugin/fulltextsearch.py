@@ -282,7 +282,7 @@ class FullTextSearch(Component):
         doc="""Whether to index file contents and filenames within changesets
         """)
 
-    raise_indexing_errors = BoolOption("search", "raise_indexing_errors",
+    stop_on_error = BoolOption("search", "stop_on_error",
         default=False,
         doc="""Setting this to true will enable raising potential exceptions
         thrown when indexing different resources. While false these exceptions
@@ -490,14 +490,14 @@ class FullTextSearch(Component):
                                num_indexed, realm)
                 summary[realm] = num_indexed
             except (TracError, NotImplementedError, ValueError, AttributeError, 
-                    PermissionError), e:
+                    PermissionError):
                 # Explicitly catches potential exceptions that can be raised 
                 #when trying to index a realm. Most of them derives from 
                 #TracError, for for example ResourceNotFound.
-                if self.raise_indexing_errors:
+                if self.stop_on_error:
                     raise
                 else:
-                    self.log.warning('Failed to index realm: %s - %s', realm, e)
+                    self.log.exception('Failed to index realm: %s', realm)
                     continue
 
         self.log.info("Completed indexing realms: %s",
