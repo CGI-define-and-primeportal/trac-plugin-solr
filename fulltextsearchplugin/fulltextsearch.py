@@ -788,7 +788,7 @@ class FullTextSearch(Component):
         for chunk in grouper(sos, 25):
             try:
                 self.backend.add(chunk, quiet=True)
-                self.log.debug("Indexed %i repository changes at revision %i",
+                self.log.debug("Indexed %i repository changes at revision %s",
                                len(chunk), changeset.rev)
             finally:
                 for so in chunk:
