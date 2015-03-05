@@ -48,6 +48,15 @@ class FullTextSearchAdmin(Component):
                interrupted, it can be resumed later using the `index` command.
                """,
                self._complete_admin_command, self._do_reindex)
+        yield ('fulltext slowreindex', 'seconds [realm]',
+               """Re-index all Trac resources, with a delay of 'seconds' between items.
+               
+               When [realm] is specified, only that realm is re-indexed.
+               Discards the search index and recreates it. Note that this
+               operation can take a long time to complete. If indexing gets
+               interrupted, it can be resumed later using the `index` command.
+               """,
+               self._complete_admin_command, self._do_reindex_slowly)
         yield ('fulltext remove', '[realm]',
                """Remove the search index, or part of it
                
@@ -66,8 +75,9 @@ class FullTextSearchAdmin(Component):
         if len(args) == 1:
             return PrefixList(fts.search_realms)
 
-    def _index(self, realm, clean):
+    def _index(self, realm, clean, delay=None):
         fts = FullTextSearch(self.env)
+        fts.indexing_delay = delay
         realms = realm and [realm] or fts.index_realms
         if clean:
             printout(_("Wiping search index and re-indexing all items in "
@@ -105,6 +115,9 @@ class FullTextSearchAdmin(Component):
     def _do_reindex(self, realm=None):
         self._index(realm, clean=True)
 
+    def _do_reindex_slowly(self, seconds, realm=None):
+        self._index(realm, clean=True, delay=float(seconds))
+        
     def _do_remove(self, realm=None):
         fts = FullTextSearch(self.env)
         realms = realm and [realm] or fts.index_realms

@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import operator
 import re
+import time
 import sunburnt
 from sunburnt.sunburnt import grouper
 import types
@@ -302,6 +303,7 @@ class FullTextSearch(Component):
             (u'source',     u'File archive', True, None,                     None),
             (u'attachment', u'Attachments',  True, self._reindex_attachment, None),
             ]
+        self.indexing_delay = None
 
         self._indexers = dict((name, indexer)
                               for name, label, enabled, indexer, permission
@@ -341,6 +343,8 @@ class FullTextSearch(Component):
         for i, resource in enumerate(resources):
             index_cb(resource)
             feedback_cb(realm, resource)
+            if self.indexing_delay:
+                time.sleep(self.indexing_delay)
         finish_cb(realm, resource)
         return i + 1
 
