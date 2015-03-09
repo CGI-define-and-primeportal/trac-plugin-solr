@@ -229,37 +229,54 @@ class Backend(Queue.Queue):
                     raise
         else:
             s = solrinterface
-            
+
         errors = 0
+        # we batch them so a single HTTP request to solr can contain
+        # multiple documents
+        adds_with_extract = 0
+        adds = []
+        deletes = []
         while True:
             try:
                 item = self.get(block=False)
             except Queue.Empty:
                 break
             if item.action in ('CREATE', 'MODIFY'):
-                try:
-                    if item.extract:
-                        s.add(item, extract=True, filename=item.id)
-                    else:
-                        s.add(item)                        
-                except sunburnt.SolrError, e:
-                    errors += 1
-                    response, content = e.args
-                    self.log.error("Encountered a Solr error indexing '%s'. "
-                                   "Solr returned: %s %s",
-                                   item, response, content)
-            elif item.action == 'DELETE':
-                s.delete(item)
-            else:
-                errors += 1
-                if quiet:
-                    self.log.error("Unknown Solr action %s on %s",
-                                   item.action, item)
+                if item.extract:
+                    adds_with_extract += 1
+                    # we'll do this right away, as in sunburnt's
+                    # implementation it'll be in a single POST anyway,
+                    # and this way simplifies the 'filename' handling
+                    #self.log.debug("Sending item %s to solr with extract=True", item)
+                    try:
+                      s.add(item, extract=True, filename=item.id)
+                    except sunburnt.SolrError, e:
+                      errors += 1
+                      response, content = e.args
+                      self.log.error("Encountered a Solr error indexing '%s'. "
+                                     "Solr returned: %s %s",
+                                     item, response, content)
                 else:
-                    raise ValueError("Unknown Solr action %s on %s"
-                                     % (item.action, item))
+                    adds.append(item)
+            elif item.action == 'DELETE':
+                deletes.append(item)
+            else:
+                self.log.error("Unknown Solr action %s on %s",
+                               item.action, item)
+
+        self.log.debug("Sent %d adds with extract=True through sunburnt", adds_with_extract)                
+        self.log.debug("Sending %d adds through sunburnt", len(adds))
+        if adds:
+            # If a single document fails, then maybe they all fail...
+            # Fortunately, it's the ones with extract=True which are
+            # more likely to fail (if Tika fails)
+            # Note: This has internal chunking to try to limit the size of a POST
+            s.add(adds)
+        self.log.debug("Sending %d deletes through sunburnt", len(deletes))
+        if deletes:
+            s.delete(deletes)
         return errors == 0
-        
+
     def commit(self, quiet=False):
         """Commit the items previously sent to solr to it's database, return
         True on success.
