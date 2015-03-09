@@ -74,7 +74,7 @@ class FullTextSearchObject(object):
                  title=None, author=None, changed=None, created=None,
                  oneline=None, tags=None, involved=None,
                  popularity=None, body=None, comments=None, action=None,
-                 **kwarg):
+                 extract=False, **kwarg):
         # we can't just filter on the first part of id, because
         # wildcards are not supported by dismax in solr yet
         self.project = project
@@ -100,6 +100,7 @@ class FullTextSearchObject(object):
         self.body = body
         self.comments = comments
         self.action = action
+        self.extract = extract
 
     def _get_realm(self):
         return self.resource.realm
@@ -134,10 +135,18 @@ class FullTextSearchObject(object):
 
 
 class Backend(Queue.Queue):
-    """In process queue for submitting documents to Apache Solr
+    """In process queue for submitting documents to Apache Solr.
+
+    In the future, this queue might be external so that:
+
+    * We can queue items even if solr is down 
+
+    * We can queue items quickly, and then transfer them to solr
+    out-of-process so the user isn't waiting
+
     """
 
-    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface):
+    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface, queue_size=1):
         """Initialize an empty queue.
 
         solr_endpoint -- URL of the Solr instance
@@ -149,30 +158,26 @@ class Backend(Queue.Queue):
         self.log = log
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
+        self.queue_size = queue_size
 
     def create(self, item, quiet=False):
         item.action = 'CREATE'
         self.put(item)
-        return self.commit(quiet=quiet)
+        if self.qsize() >= self.queue_size:
+            self.flush()
         
-    def modify(self, item, quiet=False):
+    def modify(self, item, extract=False, quiet=False):
         item.action = 'MODIFY'
         self.put(item)
-        return self.commit(quiet=quiet)
+        if self.qsize() >= self.queue_size:
+            self.flush()
     
     def delete(self, item, quiet=False):
         item.action = 'DELETE'
         self.put(item)
-        return self.commit(quiet=quiet)
+        if self.qsize() >= self.queue_size:
+            self.flush()
 
-    def add(self, item, quiet=False):
-        if isinstance(item, list):
-            for i in item:
-                self.put(i)
-        else:
-            self.put(item)
-        return self.commit(quiet=quiet)
-        
     def remove(self, project_id, realms=None):
         '''Delete docs from index where project=project_id AND realm in realms
 
@@ -189,26 +194,23 @@ class Backend(Queue.Queue):
         s.delete(queries=[query])
         s.commit()
 
-    def commit(self, quiet=False):
-        """Send items in the queue to Solr and commit them, return True on
-        success.
+    def flush(self, quiet=False, solrinterface=None):
+        """Send items in the queue to Solr, but does not commit."""
+        self.log.debug("Flushing from Python queue (%d items) to solr", self.qsize())
 
-        Success is defined as no exceptions being encountered whilst
-        communicating with Solr. The return value is intended to indicate that
-        all queued items have been indexed.
-        If `quiet` is specified then exceptions are surpressed, but still
-        counted for purposes of the return value.
-        """
+        if solrinterface is None:
+            try:
+                s = self.si_class(self.solr_endpoint)
+            except Exception, e:
+                if quiet:
+                    self.log.error("Could not flush to Solr due to: %s", e)
+                    return
+                else:
+                    raise
+        else:
+            s = solrinterface
+            
         errors = 0
-        try:
-            s = self.si_class(self.solr_endpoint)
-        except Exception, e:
-            errors += 1
-            if quiet:
-                self.log.error("Could not commit to Solr due to: %s", e)
-                return
-            else:
-                raise
         while True:
             try:
                 item = self.get(block=False)
@@ -216,10 +218,10 @@ class Backend(Queue.Queue):
                 break
             if item.action in ('CREATE', 'MODIFY'):
                 try:
-                    if hasattr(item.body, 'read'):
+                    if item.extract:
                         s.add(item, extract=True, filename=item.id)
                     else:
-                        s.add(item)
+                        s.add(item)                        
                 except sunburnt.SolrError, e:
                     errors += 1
                     response, content = e.args
@@ -236,14 +238,29 @@ class Backend(Queue.Queue):
                 else:
                     raise ValueError("Unknown Solr action %s on %s"
                                      % (item.action, item))
+        return errors == 0
+        
+    def commit(self, quiet=False):
+        """Commit the items previously sent to solr to it's database, return
+        True on success.
+
+        Success is defined as no exceptions being encountered whilst
+        communicating with Solr. The return value is intended to indicate that
+        all queued items have been indexed.
+        If `quiet` is specified then exceptions are surpressed, but still
+        counted for purposes of the return value.
+
+        """
+        s = self.si_class(self.solr_endpoint)
         try:
+            self.flush(solrinterface=s)
             s.commit()
         except Exception, e:
-            errors += 1
-            self.log.exception('%s %r', item, item)
+            self.log.exception('Failed to commit')
             if not quiet:
                 raise
-        return errors == 0
+            return False
+        return True
 
     def optimize(self):
         s = self.si_class(self.solr_endpoint)
@@ -278,6 +295,10 @@ class FullTextSearch(Component):
         doc="""Maximum document size (in bytes) to indexed.
         """)
 
+    queue_size = IntOption("search", "in_memory_queue_size", 200,
+        doc="""Number of items to store in Python queue before flushing to solr.
+        """)
+    
     fulltext_index_svn_nodes = BoolOption("search", "fulltext_index_svn_nodes",
         default=False,
         doc="""Whether to index file contents and filenames within changesets
@@ -293,7 +314,7 @@ class FullTextSearch(Component):
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
-        self.backend = Backend(self.solr_endpoint, self.log)
+        self.backend = Backend(self.solr_endpoint, self.log, queue_size=self.queue_size)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
@@ -327,6 +348,13 @@ class FullTextSearch(Component):
     def _index(self, realm, resources, check_cb, index_cb,
                feedback_cb, finish_cb):
         """Iterate through `resources` to index `realm`, return index count
+
+        The actual work of fetching the content and putting it to solr
+        is done by index_cb, which are functions such as:
+        _index_ticket()
+        _index_wiki_page()
+
+        Those functions do not commit - that is done here in _index()
         
         realm       Trac realm to which items in resources belong
         resources   Iterable of Trac resources e.g. WikiPage, Attachment
@@ -336,6 +364,7 @@ class FullTextSearch(Component):
         feedback_cb Callable that accepts a realm & resource argument
         finish_cb   Callable that accepts a realm & resource argument. The
                     resource will be None if no resources are indexed
+
         """
         i = -1
         resource = None
@@ -345,6 +374,7 @@ class FullTextSearch(Component):
             feedback_cb(realm, resource)
             if self.indexing_delay:
                 time.sleep(self.indexing_delay)
+        self.backend.commit()
         finish_cb(realm, resource)
         return i + 1
 
@@ -363,7 +393,7 @@ class FullTextSearch(Component):
         def check(changeset, status):
             return status is None or changeset.date > to_datetime(int(status))
         resources = (repo.get_changeset(rev) for rev in all_revs())
-        index = partial(self.changeset_added, repo)
+        index = partial(self._index_changeset, repo)
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_changeset(self, changeset):
@@ -374,7 +404,7 @@ class FullTextSearch(Component):
             return status is None or page.time > to_datetime(int(status))
         resources = (WikiPage(self.env, name)
                      for name in WikiSystem(self.env).get_pages())
-        index = self.wiki_page_added
+        index = self._index_wiki_page
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_wiki(self, page):
@@ -421,7 +451,7 @@ class FullTextSearch(Component):
             return (status is None
                     or attachment.date > to_datetime(int(status)))
         resources = (att(row) for row in cursor)
-        index = self.attachment_added
+        index = self._index_attachment
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_attachment(self, attachment):
@@ -435,7 +465,7 @@ class FullTextSearch(Component):
             return (status is None
                     or ticket.values['changetime'] > to_datetime(int(status)))
         resources = (Ticket(self.env, tkt_id) for (tkt_id,) in cursor)
-        index = self.ticket_created
+        index = self._index_ticket
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _update_ticket(self, ticket):
@@ -445,7 +475,7 @@ class FullTextSearch(Component):
         resources = Milestone.select(self.env)
         def check(milestone, check):
             return True
-        index = self.milestone_created
+        index = self._index_milestone
         return self._index(realm, resources, check, index, feedback, finish_fb)
 
     def _check_realms(self, realms):
@@ -473,6 +503,7 @@ class FullTextSearch(Component):
         def do_remove(db):
             cursor = db.cursor()
             self.backend.remove(self.project, realms)
+            self.backend.commit()
             cursor.executemany("DELETE FROM system WHERE name LIKE %s",
                                [('fulltextsearch_%s:%%' % r,) for r in realms])
 
@@ -558,6 +589,10 @@ class FullTextSearch(Component):
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
+        if self.index_ticket(ticket) and self.backend.commit():
+            self._update_ticket(ticket)
+        
+    def _index_ticket(self, ticket):
         ticketsystem = TicketSystem(self.env)
         resource_name = get_resource_shortname(self.env, ticket.resource)
         resource_desc = ticketsystem.get_resource_description(ticket.resource,
@@ -577,23 +612,29 @@ class FullTextSearch(Component):
                 body = u'%r' % (ticket.values,),
                 comments = [t[4] for t in ticket.get_changelog()],
                 )
-        success = self.backend.create(so, quiet=True)
-        if success:
-            self._update_ticket(ticket)
+        self.backend.create(so, quiet=True)
         self.log.debug("Ticket added for indexing: %s", ticket)
         
     def ticket_changed(self, ticket, comment, author, old_values):
-        self.ticket_created(ticket)
+        self._index_ticket(ticket)
+        if self.backend.commit():
+            self._update_ticket(ticket)
+        self.log.debug("Ticket updated: %s", ticket)            
 
     def ticket_deleted(self, ticket):
         so = FullTextSearchObject(self.project, ticket.resource)
-        success = self.backend.delete(so, quiet=True)
-        if success:
+        self.backend.delete(so, quiet=True)
+        if self.backend.commit():
             self._update_ticket(ticket)
         self.log.debug("Ticket deleted; deleting from index: %s", ticket)
 
     #IWikiChangeListener methods
     def wiki_page_added(self, page):
+        self._index_wiki_page(page)
+        if self.backend.commit():
+            self._update_wiki(page)
+
+    def _index_wiki_page(self, page):
         history = list(page.get_history())
         so = FullTextSearchObject(
                 self.project, page.resource,
@@ -608,18 +649,18 @@ class FullTextSearch(Component):
                 body = page.text,
                 comments = [r[3] for r in history],
                 )
-        success = self.backend.create(so, quiet=True)
-        if success:
-            self._update_wiki(page)
+        self.backend.create(so, quiet=True)
         self.log.debug("WikiPage created for indexing: %s", page.name)
 
     def wiki_page_changed(self, page, version, t, comment, author, ipnr):
-        self.wiki_page_added(page)
+        self._index_wiki_page(page)
+        if self.backend.commit():
+            self._update_wiki(page)
 
     def wiki_page_deleted(self, page):
         so = FullTextSearchObject(self.project, page.resource)
-        success = self.backend.delete(so, quiet=True)
-        if success:
+        self.backend.delete(so, quiet=True)
+        if self.backend.commit():
             self._update_wiki(page)
 
     def wiki_page_version_deleted(self, page):
@@ -628,9 +669,10 @@ class FullTextSearch(Component):
 
     def wiki_page_renamed(self, page, old_name): 
         so = FullTextSearchObject(self.project, page.resource.realm, old_name)
-        success = self.backend.delete(so, quiet=True)
-        if success:
-            self.wiki_page_added(page)
+        self.backend.delete(so, quiet=True)
+        self._index_wiki_page(page)
+        if self.backend.commit():
+            self._update_wiki(page)
 
     def _page_tags(self, realm, page):
         db = self.env.get_read_db()
@@ -661,6 +703,11 @@ class FullTextSearch(Component):
 
     #IAttachmentChangeListener methods
     def attachment_added(self, attachment):
+        self._index_attachment(attachment)
+        if self.backend.commit():
+            self._update_attachment(attachment)
+    
+    def _index_attachment(self, attachment):
         """Called when an attachment is added."""
         if hasattr(attachment, 'version'):
             history = list(attachment.get_history())
@@ -683,32 +730,34 @@ class FullTextSearch(Component):
                 )
         if attachment.size <= self.max_size:
             try:
-                so.body = attachment.open()
+                so.body = attachment.open().read()
+                so.extract = True
             except ResourceNotFound:
                 self.log.warning('Missing attachment file "%s" encountered '
                                  'whilst indexing full text search', 
                                  attachment)
-        try:
-            success = self.backend.create(so, quiet=True)
-            if success:
-                self._update_attachment(attachment)
-        finally:
-            if hasattr(so.body, 'close'):
-                so.body.close()
+        self.backend.create(so, quiet=True)
 
     def attachment_deleted(self, attachment):
         """Called when an attachment is deleted."""
         so = FullTextSearchObject(self.project, attachment.resource)
-        success = self.backend.delete(so, quiet=True)
-        if success:
+        self.backend.delete(so, quiet=True)
+        if self.backend.commit():        
             self._update_attachment(attachment)
 
     def attachment_reparented(self, attachment, old_parent_realm, old_parent_id):
         """Called when an attachment is reparented."""
-        self.attachment_added(attachment)
+        self._index_attachment(attachment)
+        if self.backend.commit():
+            self._update_attachment(attachment)
 
     #IMilestoneChangeListener methods
     def milestone_created(self, milestone):
+        self._index_milestone(milestone)
+        self.backend.commit()
+        self.log.debug("Milestone created for indexing: %s", milestone)
+    
+    def _index_milestone(self, milestone):
         so = FullTextSearchObject(
                 self.project, milestone.resource,
                 title = u'%s: %s' % (milestone.name,
@@ -721,7 +770,6 @@ class FullTextSearch(Component):
                 body = milestone.description,
                 )
         self.backend.create(so, quiet=True)
-        self.log.debug("Milestone created for indexing: %s", milestone)
 
     def milestone_changed(self, milestone, old_values):
         """
@@ -729,44 +777,24 @@ class FullTextSearch(Component):
         milestone properties that changed. Currently those properties can be
         'name', 'due', 'completed', or 'description'.
         """
-        self.milestone_created(milestone)
+        self._index_milestone(attachment)
+        self.backend.commit()
+        self.log.debug("Milestone changed for indexing: %s", milestone)
 
     def milestone_deleted(self, milestone):
         """Called when a milestone is deleted."""
         so = FullTextSearchObject(self.project, milestone.resource)
         self.backend.delete(so, quiet=True)
-
-    def _fill_so(self, changeset, node):
-        so = FullTextSearchObject(
-                self.project, node.resource,
-                title = node.path,
-                oneline = u'[%s]: %s' % (changeset.rev, shorten_result(changeset.message)),
-                comments = [changeset.message],
-                changed = node.get_last_modified(),
-                action = 'CREATE',
-                author = changeset.author,
-                created = changeset.date
-                )
-        if node.content_length <= self.max_size:
-            so.body = node.get_content()
-        return so
-
-    def _changes(self, repos, changeset):
-        for path, kind, change, base_path, base_rev in changeset.get_changes():
-            if change == Changeset.MOVE:
-                yield FullTextSearchObject(self.project, 'source', base_path,
-                                           repos.resource, action='DELETE')
-            elif change == Changeset.DELETE:
-                yield FullTextSearchObject(self.project, 'source', path,
-                                           repos.resource, action='DELETE')
-            if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
-                          Changeset.MOVE):
-                node = repos.get_node(path, changeset.rev)
-                yield self._fill_so(changeset, node)
+        self.backend.commit()
 
     #IRepositoryChangeListener methods
     def changeset_added(self, repos, changeset):
         """Called after a changeset has been added to a repository."""
+        self._index_changeset(repos, changeset)
+        if self.backend.commit():
+            self._update_changeset(changeset)
+        
+    def _index_changeset(self, repos, changeset):
         #Index the commit message
         so = FullTextSearchObject(
                 self.project, changeset.resource,
@@ -779,25 +807,39 @@ class FullTextSearch(Component):
                 changed=changeset.date,
                 )
         success = self.backend.create(so, quiet=True)
-        if success:
-            self._update_changeset(changeset)
 
         if not self.fulltext_index_svn_nodes:
             return
 
-        # Index the file contents of this revision, a changeset can involve
-        # thousands of files - so submit in batches to avoid exceeding the
-        # available file handles
-        sos = (so for so in self._changes(repos, changeset))
-        for chunk in grouper(sos, 25):
-            try:
-                self.backend.add(chunk, quiet=True)
-                self.log.debug("Indexed %i repository changes at revision %s",
-                               len(chunk), changeset.rev)
-            finally:
-                for so in chunk:
-                    if hasattr(so.body, 'close'):
-                        so.body.close()
+        def _changes(repos, changeset):
+            for path, kind, change, base_path, base_rev in changeset.get_changes():
+                if change == Changeset.MOVE:
+                    yield FullTextSearchObject(self.project, 'source', base_path,
+                                               repos.resource, action='DELETE')
+                elif change == Changeset.DELETE:
+                    yield FullTextSearchObject(self.project, 'source', path,
+                                               repos.resource, action='DELETE')
+                if change in (Changeset.ADD, Changeset.EDIT, Changeset.COPY,
+                              Changeset.MOVE):
+                    node = repos.get_node(path, changeset.rev)
+                    so = FullTextSearchObject(
+                            self.project, node.resource,
+                            title = node.path,
+                            oneline = u'[%s]: %s' % (changeset.rev, shorten_result(changeset.message)),
+                            comments = [changeset.message],
+                            changed = node.get_last_modified(),
+                            author = changeset.author,
+                            created = changeset.date
+                            )
+                    if node.content_length <= self.max_size:
+                        stream = node.get_content()
+                        if stream:
+                            so.body = stream.read()
+                            so.extract = True                        
+                    yield so
+        
+        for so in _changes(repos, changeset):
+            self.backend.create(so, quiet=True)
 
     def changeset_modified(self, repos, changeset, old_changeset):
         """Called after a changeset has been modified in a repository.
