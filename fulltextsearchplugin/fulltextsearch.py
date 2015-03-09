@@ -181,7 +181,7 @@ class Backend(Queue.Queue):
         if self.qsize() >= self.queue_size:
             self.flush()
         
-    def modify(self, item, extract=False, quiet=False):
+    def modify(self, item, quiet=False):
         item.action = 'MODIFY'
         self.put(item)
         if self.qsize() >= self.queue_size:
