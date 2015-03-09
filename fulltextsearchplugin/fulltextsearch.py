@@ -159,6 +159,11 @@ class Backend(Queue.Queue):
     * We can queue items quickly, and then transfer them to solr
     out-of-process so the user isn't waiting
 
+    Note, currently this queue expects FullTextSearchObject items. It
+    probably should instead be a queue of (action, Resources) tuples,
+    so the actual work of reading the database/subversion can be done
+    by the queue-consumer, not the queue-feeder.
+
     """
 
     def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface, queue_size=1):
@@ -379,6 +384,12 @@ class FullTextSearch(Component):
         feedback_cb Callable that accepts a realm & resource argument
         finish_cb   Callable that accepts a realm & resource argument. The
                     resource will be None if no resources are indexed
+
+        See discussion on Backend(Queue) - in future revision, I think
+        _index() should put (action, Resource) into a remote queue -
+        that would mean it can't take the index_cb - the
+        queue-consumer would decide which "extraction" function to use
+        based on the Resource.
 
         """
         i = -1
