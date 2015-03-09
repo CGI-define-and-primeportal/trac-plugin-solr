@@ -114,9 +114,11 @@ class FullTextSearchAdmin(Component):
 
     def _do_reindex(self, realm=None):
         self._index(realm, clean=True)
+        self._do_optimize()
 
     def _do_reindex_slowly(self, seconds, realm=None):
         self._index(realm, clean=True, delay=float(seconds))
+        self._do_optimize()        
         
     def _do_remove(self, realm=None):
         fts = FullTextSearch(self.env)
