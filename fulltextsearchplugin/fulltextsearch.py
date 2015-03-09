@@ -130,7 +130,22 @@ class FullTextSearchObject(object):
 
     def __repr__(self):
         from pprint import pformat
-        r = '<FullTextSearchObject %s>' % pformat(self.__dict__)
+        subset = dict(project = self.project,
+                      resource = self.resource,
+                      title = self.title,
+                      author = self.author,
+                      changed = self.changed,
+                      created = self.created,
+                      oneline = self.oneline,
+                      tags = self.tags,
+                      involved = self.involved,
+                      popularity = self.popularity,
+                      body = "%d bytes" % len(self.body) if self.body else None,
+                      comments = self.comments,
+                      action = self.action,
+                      extract = self.extract)
+
+        r = '<FullTextSearchObject %s>' % pformat(subset)
         return r
 
 
