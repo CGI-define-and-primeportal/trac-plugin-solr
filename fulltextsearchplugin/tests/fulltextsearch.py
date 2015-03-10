@@ -23,6 +23,8 @@ from trac.versioncontrol import svn_fs
 from svn import core, repos
 from trac_browser_svn_ops.svn_fs import SubversionWriter
 
+global_pending = []
+
 class MockSolrInterface(object):
     """A bare minimum, in process simulation of sunburnt SolrInterface
     
@@ -40,7 +42,7 @@ class MockSolrInterface(object):
 
     def __init__(self, end_point):
         self.end_point = end_point
-        self.pending = []
+        self.pending = global_pending
         self.writable = True
 
     def _doc2docs(self, doc_or_docs):
