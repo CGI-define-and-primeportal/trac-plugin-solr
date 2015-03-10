@@ -126,6 +126,7 @@ class BackendTestCase(unittest.TestCase):
     def test_create(self):
         backend = Backend(self.endpoint, self.log, MockSolrInterface)
         backend.create(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        backend.commit()
         si = backend.si_class(backend.solr_endpoint)
         self.assertEquals(1, len(si.query('realm:wiki')))
 
@@ -133,6 +134,7 @@ class BackendTestCase(unittest.TestCase):
         backend = Backend(self.endpoint, self.log, MockSolrInterface)
         backend.create(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
         backend.modify(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        backend.commit()
         si = backend.si_class(backend.solr_endpoint)
         self.assertEquals(1, len(si.query('realm:wiki')))
 
@@ -140,6 +142,7 @@ class BackendTestCase(unittest.TestCase):
         backend = Backend(self.endpoint, self.log, MockSolrInterface)
         backend.create(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
         backend.delete(self._fts_obj('ftsproj', 'wiki', 'TestPage'))
+        backend.commit()        
         si = backend.si_class(backend.solr_endpoint)
         self.assertEquals(0, len(si.query('realm:wiki')))
 
