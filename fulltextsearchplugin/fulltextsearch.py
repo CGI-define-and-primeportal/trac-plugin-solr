@@ -820,7 +820,7 @@ class FullTextSearch(Component):
         milestone properties that changed. Currently those properties can be
         'name', 'due', 'completed', or 'description'.
         """
-        self._index_milestone(attachment)
+        self._index_milestone(milestone)
         self.backend.commit()
         self.log.debug("Milestone changed for indexing: %s", milestone)
 
