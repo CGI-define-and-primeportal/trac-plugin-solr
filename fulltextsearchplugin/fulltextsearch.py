@@ -632,7 +632,8 @@ class FullTextSearch(Component):
 
     # ITicketChangeListener methods
     def ticket_created(self, ticket):
-        if self._index_ticket(ticket) and self.backend.commit():
+        self._index_ticket(ticket)
+        if self.backend.commit():
             self._update_ticket(ticket)
         
     def _index_ticket(self, ticket):
