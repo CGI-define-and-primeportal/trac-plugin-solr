@@ -12,6 +12,8 @@ from trac.test import EnvironmentStub, Mock
 from trac.ticket import Ticket, Milestone
 from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
 from trac.wiki import WikiPage
+from trac.ticket.api import TicketSystem
+from tracremoteticket.api import RemoteTicketSystem
 
 from fulltextsearchplugin.fulltextsearch import (FullTextSearchObject, Backend,
                                                  FullTextSearch,
@@ -399,6 +401,25 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertFalse('Lorem ipsum' in so.body)
         self.assertTrue('No latin filler here' in so.body)
 
+class TicketsTestCase(unittest.TestCase):
+    def setUp(self):
+        self.env = EnvironmentStub(enable=['trac.*', FullTextSearch])
+        RemoteTicketSystem(self.env).environment_created()
+        self.fts = FullTextSearch(self.env)
+        self.fts.backend = Backend(self.fts.solr_endpoint, self.env.log,
+                                   MockSolrInterface)
+        self.ticket_system = TicketSystem(self.env)
+        self.req = Mock()
+
+    def testIndexNewTicket(self):
+        ticket = Ticket(self.env)
+        ticket.insert()
+        si = self.fts.backend.si_class(self.fts.backend.solr_endpoint)
+        self.assertEquals(1, len(si.query('realm:ticket')))
+
+    def tearDown(self):
+        self.env.reset_db()
+        MockSolrInterface._reset()
 
 class ChangesetsSvnTestCase(unittest.TestCase):
     @classmethod
