@@ -4,6 +4,7 @@ from datetime import datetime
 import operator
 import re
 import time
+import retrying
 import sunburnt
 from sunburnt.sunburnt import grouper
 import types
@@ -166,19 +167,43 @@ class Backend(Queue.Queue):
 
     """
 
-    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface, queue_size=1):
+    def __init__(self,
+                 solr_endpoint,
+                 log,
+                 si_class=sunburnt.SolrInterface,
+                 queue_size=1,
+                 commit_max_attempts=None,
+                 commit_retry_wait_fixed=None,
+                 commit_retry_wait_random_min=None,
+                 commit_retry_wait_random_max=None):
         """Initialize an empty queue.
 
         solr_endpoint -- URL of the Solr instance
         log -- stdlib Logger object
         si_class -- Class which will be instantiated to communicate with Solr.
             Must match the signature of sunburnt.SolrInterface.
+        commit_max_attempts --          The maximum number of times to retry
+                                        committing before giving up
+        commit_retry_wait_fixed --      Millisecunds to wait between each
+                                        commit retry
+        commit_retry_wait_random_min -- The lower bound for the random number
+                                        of milliseconds to wait between commit
+                                        retries
+        commit_retry_wait_random_max -- The upper bound for the random number
+                                        of milliseconds to wait between commit
+                                        retries
         """
         Queue.Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
         self.queue_size = queue_size
+        retry_wrap = retrying.retry(
+            stop_max_attempt_number=commit_max_attempts,
+            wait_fixed=commit_retry_wait_fixed,
+            wait_random_min=commit_retry_wait_random_min,
+            wait_random_max=commit_retry_wait_random_max)
+        self.commit = retry_wrap(self.commit)
 
     def create(self, item, quiet=False):
         item.action = 'CREATE'
@@ -348,10 +373,36 @@ class FullTextSearch(Component):
         will be ignored.
         """)
 
+    commit_max_attempts = IntOption("search", "commit_max_attempts", None,
+        doc="""The maximum number of times to retry committing before giving
+        up""")
+
+    commit_retry_wait_fixed = IntOption("search", "commit_retry_wait_fixed",
+        None, doc="""Millisecunds to wait between each commit retry""")
+
+    commit_retry_wait_random_min = IntOption("search",
+        "commit_retry_wait_random_min", None,
+        doc="""The lower bound for the random number of milliseconds to wait
+        between commit retries""")
+
+    commit_retry_wait_random_max = IntOption("search",
+        "commit_retry_wait_random_max", None,
+        doc="""The upper bound for the random number of milliseconds to wait
+        between commit retries""")
+
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
-        self.backend = Backend(self.solr_endpoint, self.log, queue_size=self.queue_size)
+        self.backend = Backend(self.solr_endpoint,
+                               self.log,
+                               queue_size=self.queue_size,
+                               commit_max_attempts=self.commit_max_attempts,
+                               commit_retry_wait_fixed=
+                                   self.commit_retry_wait_fixed,
+                               commit_retry_wait_random_min=
+                                   self.commit_retry_wait_random_min,
+                               commit_retry_wait_random_max=
+                                   self.commit_retry_wait_random_max)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
