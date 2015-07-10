@@ -172,24 +172,24 @@ class Backend(Queue.Queue):
                  log,
                  si_class=sunburnt.SolrInterface,
                  queue_size=1,
-                 commit_max_attempts=None,
-                 commit_retry_wait_fixed=None,
-                 commit_retry_wait_random_min=None,
-                 commit_retry_wait_random_max=None):
+                 api_max_attempts=None,
+                 api_retry_wait_fixed=None,
+                 api_retry_wait_random_min=None,
+                 api_retry_wait_random_max=None):
         """Initialize an empty queue.
 
         solr_endpoint -- URL of the Solr instance
         log -- stdlib Logger object
         si_class -- Class which will be instantiated to communicate with Solr.
             Must match the signature of sunburnt.SolrInterface.
-        commit_max_attempts --          The maximum number of times to retry
+        api_max_attempts --          The maximum number of times to retry
                                         committing before giving up
-        commit_retry_wait_fixed --      Millisecunds to wait between each
+        api_retry_wait_fixed --      Millisecunds to wait between each
                                         commit retry
-        commit_retry_wait_random_min -- The lower bound for the random number
+        api_retry_wait_random_min -- The lower bound for the random number
                                         of milliseconds to wait between commit
                                         retries
-        commit_retry_wait_random_max -- The upper bound for the random number
+        api_retry_wait_random_max -- The upper bound for the random number
                                         of milliseconds to wait between commit
                                         retries
         """
@@ -198,12 +198,12 @@ class Backend(Queue.Queue):
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
         self.queue_size = queue_size
-        retry_wrap = retrying.retry(
-            stop_max_attempt_number=commit_max_attempts,
-            wait_fixed=commit_retry_wait_fixed,
-            wait_random_min=commit_retry_wait_random_min,
-            wait_random_max=commit_retry_wait_random_max)
-        self.commit = retry_wrap(self.commit)
+
+        self.retry_wrap = retrying.retry(
+            stop_max_attempt_number=api_max_attempts,
+            wait_fixed=api_retry_wait_fixed,
+            wait_random_min=api_retry_wait_random_min,
+            wait_random_max=api_retry_wait_random_max)
 
     def create(self, item, quiet=False):
         item.action = 'CREATE'
@@ -228,7 +228,7 @@ class Backend(Queue.Queue):
 
         If realms is not specified then delete all documents in project_id.
         '''
-        s = self.si_class(self.solr_endpoint)
+        s = self.retry_wrap(self.si_class)(self.solr_endpoint)
         Q = s.query().Q
         q = s.query(u'project:%s' % project_id)
         if realms:
@@ -236,8 +236,8 @@ class Backend(Queue.Queue):
                                    [Q(u'realm:%s' % realm)
                                     for realm in realms]))
         # I would have like some more info back
-        s.delete(queries=[query])
-        s.commit()
+        self.retry_wrap(s.delete)(queries=[query])
+        self.retry_wrap(s.commit)()
 
     def flush(self, quiet=False, solrinterface=None):
         """Send items in the queue to Solr, but does not commit."""
@@ -245,7 +245,7 @@ class Backend(Queue.Queue):
 
         if solrinterface is None:
             try:
-                s = self.si_class(self.solr_endpoint)
+                s = self.retry_wrap(self.si_class)(self.solr_endpoint)
             except Exception, e:
                 if quiet:
                     self.log.error("Could not flush to Solr due to: %s", e)
@@ -254,7 +254,7 @@ class Backend(Queue.Queue):
                     raise
         else:
             s = solrinterface
-
+            
         errors = 0
         # we batch them so a single HTTP request to solr can contain
         # multiple documents
@@ -274,7 +274,7 @@ class Backend(Queue.Queue):
                     # and this way simplifies the 'filename' handling
                     #self.log.debug("Sending item %s to solr with extract=True", item)
                     try:
-                      s.add(item, extract=True, filename=item.id)
+                      self.retry_wrap(s.add)(item, extract=True, filename=item.id)
                     except sunburnt.SolrError, e:
                       errors += 1
                       response, content = e.args
@@ -296,10 +296,10 @@ class Backend(Queue.Queue):
             # Fortunately, it's the ones with extract=True which are
             # more likely to fail (if Tika fails)
             # Note: This has internal chunking to try to limit the size of a POST
-            s.add(adds)
+            self.retry_wrap(s.add)(adds)
         self.log.debug("Sending %d deletes through sunburnt", len(deletes))
         if deletes:
-            s.delete(deletes)
+            self.retry_wrap(s.delete)(deletes)
         return errors == 0
 
     def commit(self, quiet=False):
@@ -313,10 +313,10 @@ class Backend(Queue.Queue):
         counted for purposes of the return value.
 
         """
-        s = self.si_class(self.solr_endpoint)
+        s = self.retry_wrap(self.si_class)(self.solr_endpoint)
         try:
             self.flush(solrinterface=s)
-            s.commit()
+            self.retry_wrap(s.commit)()
         except Exception, e:
             self.log.exception('Failed to commit')
             if not quiet:
@@ -325,7 +325,7 @@ class Backend(Queue.Queue):
         return True
 
     def optimize(self):
-        s = self.si_class(self.solr_endpoint)
+        s = self.retry_wrap(self.si_class)(self.solr_endpoint)
         try:
             s.optimize()
         except Exception:
@@ -373,20 +373,20 @@ class FullTextSearch(Component):
         will be ignored.
         """)
 
-    commit_max_attempts = IntOption("search", "commit_max_attempts", None,
+    api_max_attempts = IntOption("search", "api_max_attempts", None,
         doc="""The maximum number of times to retry committing before giving
         up""")
 
-    commit_retry_wait_fixed = IntOption("search", "commit_retry_wait_fixed",
+    api_retry_wait_fixed = IntOption("search", "api_retry_wait_fixed",
         None, doc="""Millisecunds to wait between each commit retry""")
 
-    commit_retry_wait_random_min = IntOption("search",
-        "commit_retry_wait_random_min", None,
+    api_retry_wait_random_min = IntOption("search",
+        "api_retry_wait_random_min", None,
         doc="""The lower bound for the random number of milliseconds to wait
         between commit retries""")
 
-    commit_retry_wait_random_max = IntOption("search",
-        "commit_retry_wait_random_max", None,
+    api_retry_wait_random_max = IntOption("search",
+        "api_retry_wait_random_max", None,
         doc="""The upper bound for the random number of milliseconds to wait
         between commit retries""")
 
@@ -396,13 +396,10 @@ class FullTextSearch(Component):
         self.backend = Backend(self.solr_endpoint,
                                self.log,
                                queue_size=self.queue_size,
-                               commit_max_attempts=self.commit_max_attempts,
-                               commit_retry_wait_fixed=
-                                   self.commit_retry_wait_fixed,
-                               commit_retry_wait_random_min=
-                                   self.commit_retry_wait_random_min,
-                               commit_retry_wait_random_max=
-                                   self.commit_retry_wait_random_max)
+                               api_max_attempts=self.api_max_attempts,
+                               api_retry_wait_fixed=self.api_retry_wait_fixed,
+                               api_retry_wait_random_min=self.api_retry_wait_random_min,
+                               api_retry_wait_random_max=self.api_retry_wait_random_max)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
