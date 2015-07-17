@@ -184,7 +184,7 @@ class Backend(Queue.Queue):
             Must match the signature of sunburnt.SolrInterface.
         api_max_attempts --          The maximum number of times to retry
                                         committing before giving up
-        api_retry_wait_fixed --      Millisecunds to wait between each
+        api_retry_wait_fixed --      Milliseconds to wait between each
                                         commit retry
         api_retry_wait_random_min -- The lower bound for the random number
                                         of milliseconds to wait between commit
