@@ -6,6 +6,7 @@ import re
 import time
 import retrying
 import sunburnt
+import httplib2
 from sunburnt.sunburnt import grouper
 import types
 
@@ -175,7 +176,8 @@ class Backend(Queue.Queue):
                  api_max_attempts=None,
                  api_retry_wait_fixed=None,
                  api_retry_wait_random_min=None,
-                 api_retry_wait_random_max=None):
+                 api_retry_wait_random_max=None,
+                 solr_http_timeout=None):
         """Initialize an empty queue.
 
         solr_endpoint -- URL of the Solr instance
@@ -192,6 +194,7 @@ class Backend(Queue.Queue):
         api_retry_wait_random_max -- The upper bound for the random number
                                         of milliseconds to wait between commit
                                         retries
+        solr_http_timeout -- Seconds to wait for http requests to solr (None for Python default)
         """
         Queue.Queue.__init__(self)
         self.log = log
@@ -204,6 +207,8 @@ class Backend(Queue.Queue):
             wait_fixed=api_retry_wait_fixed,
             wait_random_min=api_retry_wait_random_min,
             wait_random_max=api_retry_wait_random_max)
+
+        self.http_connection = httplib2.Http(timeout=solr_http_timeout)
 
     def create(self, item, quiet=False):
         item.action = 'CREATE'
@@ -228,7 +233,7 @@ class Backend(Queue.Queue):
 
         If realms is not specified then delete all documents in project_id.
         '''
-        s = self.retry_wrap(self.si_class)(self.solr_endpoint)
+        s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
         Q = s.query().Q
         q = s.query(u'project:%s' % project_id)
         if realms:
@@ -245,7 +250,7 @@ class Backend(Queue.Queue):
 
         if solrinterface is None:
             try:
-                s = self.retry_wrap(self.si_class)(self.solr_endpoint)
+                s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
             except Exception, e:
                 if quiet:
                     self.log.error("Could not flush to Solr due to: %s", e)
@@ -313,7 +318,7 @@ class Backend(Queue.Queue):
         counted for purposes of the return value.
 
         """
-        s = self.retry_wrap(self.si_class)(self.solr_endpoint)
+        s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
         try:
             self.flush(solrinterface=s)
             self.retry_wrap(s.commit)()
@@ -325,7 +330,7 @@ class Backend(Queue.Queue):
         return True
 
     def optimize(self):
-        s = self.retry_wrap(self.si_class)(self.solr_endpoint)
+        s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
         try:
             s.optimize()
         except Exception:
@@ -373,6 +378,9 @@ class FullTextSearch(Component):
         will be ignored.
         """)
 
+    solr_http_timeout = IntOption("search", "http_timeout", 30,
+        doc="""The maximum number of seconds to wait for solr http requests""")
+
     api_max_attempts = IntOption("search", "api_max_attempts", None,
         doc="""The maximum number of times to retry committing before giving
         up""")
@@ -399,7 +407,8 @@ class FullTextSearch(Component):
                                api_max_attempts=self.api_max_attempts,
                                api_retry_wait_fixed=self.api_retry_wait_fixed,
                                api_retry_wait_random_min=self.api_retry_wait_random_min,
-                               api_retry_wait_random_max=self.api_retry_wait_random_max)
+                               api_retry_wait_random_max=self.api_retry_wait_random_max,
+                               solr_http_timeout=self.solr_http_timeout)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
