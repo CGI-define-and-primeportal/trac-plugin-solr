@@ -172,6 +172,7 @@ class Backend(Queue.Queue):
                  log,
                  si_class=sunburnt.SolrInterface,
                  queue_size=1,
+                 solr_retry_timeout=None,
                  solr_http_timeout=None):
 
         """Initialize an empty queue.
@@ -180,6 +181,7 @@ class Backend(Queue.Queue):
         log -- stdlib Logger object
         si_class -- Class which will be instantiated to communicate with Solr.
             Must match the signature of sunburnt.SolrInterface.
+        solr_retry_timeout -- Seconds to wait before retrying http request to solr (-1 to disable retry)
         solr_http_timeout -- Seconds to wait for http requests to solr (None for Python default)
         """
         Queue.Queue.__init__(self)
@@ -187,6 +189,7 @@ class Backend(Queue.Queue):
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
         self.queue_size = queue_size
+        self.retry_timeout = solr_retry_timeout
         self.http_connection = httplib2.Http(timeout=solr_http_timeout)
 
     def create(self, item, quiet=False):
@@ -212,7 +215,9 @@ class Backend(Queue.Queue):
 
         If realms is not specified then delete all documents in project_id.
         '''
-        s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
+        s = self.si_class(self.solr_endpoint,
+                          http_connection=self.http_connection,
+                          retry_timeout=self.retry_timeout)
         Q = s.query().Q
         q = s.query(u'project:%s' % project_id)
         if realms:
@@ -229,7 +234,9 @@ class Backend(Queue.Queue):
 
         if solrinterface is None:
             try:
-                s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
+                s = self.si_class(self.solr_endpoint,
+                                  http_connection=self.http_connection,
+                                  retry_timeout=self.retry_timeout)
             except Exception, e:
                 if quiet:
                     self.log.error("Could not flush to Solr due to: %s", e)
@@ -297,7 +304,9 @@ class Backend(Queue.Queue):
         counted for purposes of the return value.
 
         """
-        s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
+        s = self.si_class(self.solr_endpoint,
+                          http_connection=self.http_connection,
+                          retry_timeout=self.retry_timeout)
         try:
             self.flush(solrinterface=s)
             s.commit()
@@ -309,7 +318,9 @@ class Backend(Queue.Queue):
         return True
 
     def optimize(self):
-        s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
+        s = self.si_class(self.solr_endpoint,
+                          http_connection=self.http_connection,
+                          retry_timeout=self.retry_timeout)
         try:
             s.optimize()
         except Exception:
@@ -360,6 +371,8 @@ class FullTextSearch(Component):
     solr_http_timeout = IntOption("search", "http_timeout", 30,
         doc="""The maximum number of seconds to wait for solr http requests""")
 
+    solr_retry_timeout = IntOption("search", "retry_timeout", 2,
+        doc="""Seconds to wait before retrying an HTTP request to solr (-1 to disable retry)""")
     
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
@@ -367,6 +380,7 @@ class FullTextSearch(Component):
         self.backend = Backend(self.solr_endpoint,
                                self.log,
                                queue_size=self.queue_size,
+                               solr_retry_timeout=self.solr_retry_timeout,
                                solr_http_timeout=self.solr_http_timeout)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
@@ -983,10 +997,9 @@ class FullTextSearch(Component):
 
     def _do_search(self, terms, filters, facet='realm', sort_by=None,
                                          field_limit=None):
-        try:
-            si = self.backend.si_class(self.solr_endpoint)
-        except:
-            raise
+        si = self.backend.si_class(self.solr_endpoint,
+                                   http_connection=self.backend.http_connection,
+                                   retry_timeout=self.backend.retry_timeout)
 
         # Restrict search to chosen realms, if none of our filters were chosen
         # then we won't have any results - return early, empty handed
