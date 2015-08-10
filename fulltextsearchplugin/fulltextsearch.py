@@ -4,9 +4,7 @@ from datetime import datetime
 import operator
 import re
 import time
-import retrying
 import sunburnt
-import httplib2
 from sunburnt.sunburnt import grouper
 import types
 
@@ -168,47 +166,19 @@ class Backend(Queue.Queue):
 
     """
 
-    def __init__(self,
-                 solr_endpoint,
-                 log,
-                 si_class=sunburnt.SolrInterface,
-                 queue_size=1,
-                 api_max_attempts=None,
-                 api_retry_wait_fixed=None,
-                 api_retry_wait_random_min=None,
-                 api_retry_wait_random_max=None,
-                 solr_http_timeout=None):
+    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface, queue_size=1):
         """Initialize an empty queue.
 
         solr_endpoint -- URL of the Solr instance
         log -- stdlib Logger object
         si_class -- Class which will be instantiated to communicate with Solr.
             Must match the signature of sunburnt.SolrInterface.
-        api_max_attempts --          The maximum number of times to retry
-                                        committing before giving up
-        api_retry_wait_fixed --      Milliseconds to wait between each
-                                        commit retry
-        api_retry_wait_random_min -- The lower bound for the random number
-                                        of milliseconds to wait between commit
-                                        retries
-        api_retry_wait_random_max -- The upper bound for the random number
-                                        of milliseconds to wait between commit
-                                        retries
-        solr_http_timeout -- Seconds to wait for http requests to solr (None for Python default)
         """
         Queue.Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
         self.queue_size = queue_size
-
-        self.retry_wrap = retrying.retry(
-            stop_max_attempt_number=api_max_attempts,
-            wait_fixed=api_retry_wait_fixed,
-            wait_random_min=api_retry_wait_random_min,
-            wait_random_max=api_retry_wait_random_max)
-
-        self.http_connection = httplib2.Http(timeout=solr_http_timeout)
 
     def create(self, item, quiet=False):
         item.action = 'CREATE'
@@ -233,7 +203,7 @@ class Backend(Queue.Queue):
 
         If realms is not specified then delete all documents in project_id.
         '''
-        s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
+        s = self.si_class(self.solr_endpoint)
         Q = s.query().Q
         q = s.query(u'project:%s' % project_id)
         if realms:
@@ -241,8 +211,8 @@ class Backend(Queue.Queue):
                                    [Q(u'realm:%s' % realm)
                                     for realm in realms]))
         # I would have like some more info back
-        self.retry_wrap(s.delete)(queries=[query])
-        self.retry_wrap(s.commit)()
+        s.delete(queries=[query])
+        s.commit()
 
     def flush(self, quiet=False, solrinterface=None):
         """Send items in the queue to Solr, but does not commit."""
@@ -250,7 +220,7 @@ class Backend(Queue.Queue):
 
         if solrinterface is None:
             try:
-                s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
+                s = self.si_class(self.solr_endpoint)
             except Exception, e:
                 if quiet:
                     self.log.error("Could not flush to Solr due to: %s", e)
@@ -259,7 +229,7 @@ class Backend(Queue.Queue):
                     raise
         else:
             s = solrinterface
-            
+
         errors = 0
         # we batch them so a single HTTP request to solr can contain
         # multiple documents
@@ -279,7 +249,7 @@ class Backend(Queue.Queue):
                     # and this way simplifies the 'filename' handling
                     #self.log.debug("Sending item %s to solr with extract=True", item)
                     try:
-                      self.retry_wrap(s.add)(item, extract=True, filename=item.id)
+                      s.add(item, extract=True, filename=item.id)
                     except sunburnt.SolrError, e:
                       errors += 1
                       response, content = e.args
@@ -301,10 +271,10 @@ class Backend(Queue.Queue):
             # Fortunately, it's the ones with extract=True which are
             # more likely to fail (if Tika fails)
             # Note: This has internal chunking to try to limit the size of a POST
-            self.retry_wrap(s.add)(adds)
+            s.add(adds)
         self.log.debug("Sending %d deletes through sunburnt", len(deletes))
         if deletes:
-            self.retry_wrap(s.delete)(deletes)
+            s.delete(deletes)
         return errors == 0
 
     def commit(self, quiet=False):
@@ -318,10 +288,10 @@ class Backend(Queue.Queue):
         counted for purposes of the return value.
 
         """
-        s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
+        s = self.si_class(self.solr_endpoint)
         try:
             self.flush(solrinterface=s)
-            self.retry_wrap(s.commit)()
+            s.commit()
         except Exception, e:
             self.log.exception('Failed to commit')
             if not quiet:
@@ -330,7 +300,7 @@ class Backend(Queue.Queue):
         return True
 
     def optimize(self):
-        s = self.retry_wrap(self.si_class)(self.solr_endpoint, http_connection=self.http_connection)
+        s = self.si_class(self.solr_endpoint)
         try:
             s.optimize()
         except Exception:
@@ -378,37 +348,10 @@ class FullTextSearch(Component):
         will be ignored.
         """)
 
-    solr_http_timeout = IntOption("search", "http_timeout", 30,
-        doc="""The maximum number of seconds to wait for solr http requests""")
-
-    api_max_attempts = IntOption("search", "api_max_attempts", None,
-        doc="""The maximum number of times to retry committing before giving
-        up""")
-
-    api_retry_wait_fixed = IntOption("search", "api_retry_wait_fixed",
-        None, doc="""Millisecunds to wait between each commit retry""")
-
-    api_retry_wait_random_min = IntOption("search",
-        "api_retry_wait_random_min", None,
-        doc="""The lower bound for the random number of milliseconds to wait
-        between commit retries""")
-
-    api_retry_wait_random_max = IntOption("search",
-        "api_retry_wait_random_max", None,
-        doc="""The upper bound for the random number of milliseconds to wait
-        between commit retries""")
-
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
-        self.backend = Backend(self.solr_endpoint,
-                               self.log,
-                               queue_size=self.queue_size,
-                               api_max_attempts=self.api_max_attempts,
-                               api_retry_wait_fixed=self.api_retry_wait_fixed,
-                               api_retry_wait_random_min=self.api_retry_wait_random_min,
-                               api_retry_wait_random_max=self.api_retry_wait_random_max,
-                               solr_http_timeout=self.solr_http_timeout)
+        self.backend = Backend(self.solr_endpoint, self.log, queue_size=self.queue_size)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
