@@ -5,6 +5,7 @@ import operator
 import re
 import time
 import sunburnt
+import httplib2
 from sunburnt.sunburnt import grouper
 import types
 
@@ -166,19 +167,27 @@ class Backend(Queue.Queue):
 
     """
 
-    def __init__(self, solr_endpoint, log, si_class=sunburnt.SolrInterface, queue_size=1):
+    def __init__(self,
+                 solr_endpoint,
+                 log,
+                 si_class=sunburnt.SolrInterface,
+                 queue_size=1,
+                 solr_http_timeout=None):
+
         """Initialize an empty queue.
 
         solr_endpoint -- URL of the Solr instance
         log -- stdlib Logger object
         si_class -- Class which will be instantiated to communicate with Solr.
             Must match the signature of sunburnt.SolrInterface.
+        solr_http_timeout -- Seconds to wait for http requests to solr (None for Python default)
         """
         Queue.Queue.__init__(self)
         self.log = log
         self.solr_endpoint = solr_endpoint
         self.si_class = si_class
         self.queue_size = queue_size
+        self.http_connection = httplib2.Http(timeout=solr_http_timeout)
 
     def create(self, item, quiet=False):
         item.action = 'CREATE'
@@ -203,7 +212,7 @@ class Backend(Queue.Queue):
 
         If realms is not specified then delete all documents in project_id.
         '''
-        s = self.si_class(self.solr_endpoint)
+        s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
         Q = s.query().Q
         q = s.query(u'project:%s' % project_id)
         if realms:
@@ -220,7 +229,7 @@ class Backend(Queue.Queue):
 
         if solrinterface is None:
             try:
-                s = self.si_class(self.solr_endpoint)
+                s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
             except Exception, e:
                 if quiet:
                     self.log.error("Could not flush to Solr due to: %s", e)
@@ -288,7 +297,7 @@ class Backend(Queue.Queue):
         counted for purposes of the return value.
 
         """
-        s = self.si_class(self.solr_endpoint)
+        s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
         try:
             self.flush(solrinterface=s)
             s.commit()
@@ -300,7 +309,7 @@ class Backend(Queue.Queue):
         return True
 
     def optimize(self):
-        s = self.si_class(self.solr_endpoint)
+        s = self.si_class(self.solr_endpoint, http_connection=self.http_connection)
         try:
             s.optimize()
         except Exception:
@@ -348,10 +357,17 @@ class FullTextSearch(Component):
         will be ignored.
         """)
 
+    solr_http_timeout = IntOption("search", "http_timeout", 30,
+        doc="""The maximum number of seconds to wait for solr http requests""")
+
+    
     #Warning, sunburnt is case sensitive via lxml on xpath searches while solr is not
     #in the default schema fieldType and fieldtype mismatch gives problem
     def __init__(self):
-        self.backend = Backend(self.solr_endpoint, self.log, queue_size=self.queue_size)
+        self.backend = Backend(self.solr_endpoint,
+                               self.log,
+                               queue_size=self.queue_size,
+                               solr_http_timeout=self.solr_http_timeout)
         self.project = os.path.split(self.env.path)[1]
         self._realms = [
             (u'ticket',     u'Tickets',      True, self._reindex_ticket,     'TICKET_VIEW'),
