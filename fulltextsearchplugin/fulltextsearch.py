@@ -6,8 +6,6 @@ import re
 import time
 import sunburnt
 import httplib2
-from sunburnt.sunburnt import grouper
-import types
 
 from trac.env import IEnvironmentSetupParticipant
 from trac.core import Component, implements, Interface, TracError
@@ -21,7 +19,6 @@ from trac.wiki.model import WikiPage
 from trac.wiki.web_ui import WikiModule
 from trac.util.text import shorten_line
 from trac.attachment import IAttachmentChangeListener, Attachment
-from trac.attachment import AttachmentModule
 from trac.versioncontrol.api import IRepositoryChangeListener, Changeset
 from trac.versioncontrol.web_ui import ChangesetModule
 from trac.resource import (get_resource_shortname, get_resource_url,
@@ -880,7 +877,7 @@ class FullTextSearch(Component):
                 created=changeset.date,
                 changed=changeset.date,
                 )
-        success = self.backend.create(so, quiet=True)
+        self.backend.create(so, quiet=True)
 
         if not self.fulltext_index_svn_nodes:
             return

@@ -27,7 +27,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # ----------------------------------------------------------------------------
 
-from setuptools import find_packages, setup
+from setuptools import setup
 
 setup(
     name = 'FullTextSearchPlugin', 
