@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from StringIO import StringIO
 import os
 import shutil
@@ -10,7 +10,7 @@ from trac.attachment import Attachment
 from trac.resource import Resource
 from trac.test import EnvironmentStub, Mock
 from trac.ticket import Ticket, Milestone
-from trac.util.datefmt import utc
+from trac.util.datefmt import from_utimestamp, to_utimestamp, utc
 from trac.wiki import WikiPage
 from trac.ticket.api import TicketSystem
 from tracremoteticket.api import RemoteTicketSystem
@@ -19,6 +19,8 @@ from fulltextsearchplugin.fulltextsearch import (FullTextSearchObject, Backend,
                                                  FullTextSearch,
                                                  )
 from trac.versioncontrol.api import RepositoryManager, DbRepositoryProvider
+from trac.loader import load_components
+import pkg_resources
 from trac.versioncontrol import svn_fs
 from svn import core, repos
 from trac_browser_svn_ops.svn_fs import SubversionWriter
@@ -363,6 +365,7 @@ class FullTextSearchTestCase(unittest.TestCase):
         self.assertTrue('Could eat no fat' in so.comments)
     
     def test_wiki_page_unicode_error(self):
+        import pkg_resources
         import define
         text = open(pkg_resources.resource_filename(define.__name__, 'default-pages/DefineGuide%2FTicketTutorial')).read()
         page = WikiPage(self.env, 'TicketTutorial')
