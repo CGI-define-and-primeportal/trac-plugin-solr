@@ -42,8 +42,9 @@ class MockSolrInterface(object):
     docs = {} # Committed documents - keyed by id, shared by all instanced
     hist = [] # History of operations - in the order committed
 
-    def __init__(self, url=None, schemadoc=None, http_connection=None):
+    def __init__(self, url=None, schemadoc=None, http_connection=None, end_point=None, retry_timeout=None):
         self.end_point = end_point
+        self.retry_timeout = retry_timeout
         self.pending = global_pending
         self.writable = True
 
