@@ -310,6 +310,9 @@ class Backend(Queue.Queue):
         try:
             self.flush(solrinterface=s)
             s.commit()
+        except sunburnt.SolrError, e:
+            self.log.exception('SolrError encountered while committing')
+            return True  # The resource Will be saved in the next commit
         except Exception, e:
             self.log.exception('Failed to commit')
             if not quiet:
